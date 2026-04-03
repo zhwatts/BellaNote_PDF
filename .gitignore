@@ -1,0 +1,55 @@
+# --- Python ---
+venv/
+.venv/
+env/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+dist/
+build/
+
+# --- Node / frontend (root-level if any) ---
+node_modules/
+
+# --- App build output (run `npm run build` in frontend/) ---
+static/
+
+# --- Local data (SQLite, rendered slides, stored PDFs) ---
+data/db.sqlite
+data/db.sqlite-*
+data/db.sqlite-journal
+data/slides/**/*
+!data/slides/.gitkeep
+data/originals/**/*
+!data/originals/.gitkeep
+
+# --- OS & editors ---
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Logs ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

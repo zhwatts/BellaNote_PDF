@@ -1,0 +1,110 @@
+.highlight-textarea-wrap {
+  width: 100%;
+}
+
+.highlight-textarea-wrap--starred {
+  border-left: 3px solid #71717a;
+  padding-left: 8px;
+}
+
+.highlight-textarea-star {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.highlight-textarea-star-icon {
+  margin-right: 4px;
+}
+
+.highlight-textarea-field {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.highlight-textarea-field.ant-input {
+  border-radius: 8px;
+}
+
+.highlight-textarea-status {
+  font-size: 12px;
+  min-height: 14px;
+  line-height: 1.2;
+}
+
+.highlight-tiptap-toolbar {
+  margin-bottom: 4px;
+}
+
+.highlight-toolbar-vdiv {
+  height: 1.375rem;
+  margin: 0 4px;
+  border-inline-start-color: #d9d9d9;
+}
+
+/*
+ * editorProps.class is applied directly on the contenteditable (.ProseMirror),
+ * so rules must be .highlight-tiptap-editor … not .highlight-tiptap-editor .ProseMirror
+ * (otherwise default <p> margins stay and add huge vertical space).
+ */
+.highlight-tiptap-editor {
+  outline: none;
+  font-size: 14px;
+  line-height: 1.45;
+  /* Equal inset on all sides */
+  padding: 6px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.highlight-tiptap-editor:focus-within {
+  border-color: #4096ff;
+  box-shadow: 0 0 0 2px rgba(5, 145, 255, 0.1);
+}
+
+.highlight-tiptap-editor > * {
+  margin: 0;
+}
+
+.highlight-tiptap-editor p {
+  margin: 0;
+}
+
+.highlight-tiptap-editor p + p,
+.highlight-tiptap-editor ul,
+.highlight-tiptap-editor ol {
+  margin-top: 0.35em;
+}
+
+.highlight-tiptap-editor ul,
+.highlight-tiptap-editor ol {
+  margin-bottom: 0;
+  padding-left: 1.25em;
+}
+
+.highlight-tiptap-editor li {
+  margin: 0.15em 0;
+}
+
+.highlight-tiptap-editor li p {
+  margin: 0;
+}
+
+.highlight-tiptap-editor h2,
+.highlight-tiptap-editor h3 {
+  margin: 0.35em 0 0.2em;
+  line-height: 1.3;
+}
+
+.highlight-tiptap-editor h2:first-child,
+.highlight-tiptap-editor h3:first-child {
+  margin-top: 0;
+}
+
+.highlight-tiptap-editor p.is-editor-empty:first-child::before {
+  color: #bfbfbf;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

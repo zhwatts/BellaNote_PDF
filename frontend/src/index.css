@@ -1,0 +1,38 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  /* Light cool gray canvas (slight slate / blue-gray, not saturated blue) */
+  --reme-bg: #e8ebf1;
+  /* Main workspace: lighter than legacy canvas; sidebar stays its own color */
+  --reme-bg-main: #f2f5fa;
+  --reme-bg-subtle: #eef1f7;
+  --reme-surface: #f3f5f8;
+  --reme-surface-hover: #e8ecf2;
+  --reme-elevated: #fafbfc;
+  --reme-border: #d1d7e0;
+  --reme-border-strong: #c5ccd8;
+  --reme-text: #1e293b;
+  --reme-text-secondary: #64748b;
+  --reme-text-muted: #94a3b8;
+  --reme-accent: #5f6b7a;
+  --reme-accent-soft: rgba(95, 107, 122, 0.12);
+  /* Sidebar row: visibly distinct from sider (#e4e7ef) */
+  --reme-selected: #cfd6e3;
+  --reme-row-line: #e0e4ed;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--reme-bg-main);
+  color: var(--reme-text);
+}
