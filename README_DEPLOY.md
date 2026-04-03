@@ -1,4 +1,6 @@
-# Deployment Setup Guide
+<!-- @format -->
+
+# Deployment Setup Guide Instructions
 
 This app is hosted on Render and deploys automatically via GitHub Actions on every merge to `main`.
 

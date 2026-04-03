@@ -33,7 +33,7 @@ app = FastAPI(title="Bella Note")
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    return {"status": "ok — all systems are operational"}
 
 
 class SlideHideBody(BaseModel):
@@ -188,7 +188,9 @@ def post_documents_reorder(body: DocumentsReorderBody) -> dict:
     proxy or client uses a trailing slash.
     """
     if len(body.document_ids) != len(set(body.document_ids)):
-        raise HTTPException(status_code=400, detail="document_ids must not contain duplicates")
+        raise HTTPException(
+            status_code=400, detail="document_ids must not contain duplicates"
+        )
     ok = db.reorder_documents(body.document_ids)
     if not ok:
         raise HTTPException(
