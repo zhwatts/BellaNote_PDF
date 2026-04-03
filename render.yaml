@@ -5,7 +5,7 @@ services:
     region: oregon
     plan: free
     branch: main
-    buildCommand: pip install -r requirements.txt
+    buildCommand: bash scripts/render-build.sh
     startCommand: cd apps/api && uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:

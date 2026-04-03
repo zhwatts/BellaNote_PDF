@@ -4,6 +4,8 @@
 
 This app is hosted on Render and deploys automatically via GitHub Actions on every merge to `main`.
 
+The **UI and API share one URL**: the build runs `npm run build`, which outputs the Vite app to `static/` at the repo root; FastAPI then serves those files at `/` while API routes (`/documents`, `/upload`, etc.) stay on the same host. Open your Render service base URL (no path) for the Bella Note UI.
+
 **Monorepo note:** The FastAPI app lives in `apps/api/`. The included `render.yaml` and `Procfile` use `cd apps/api && uvicorn main:app ...` so Python imports (`database`, `pdf_processor`) resolve the same way as local development from `apps/api`. If you configure the service manually in the Render dashboard, use that start command (or set **Root Directory** to `apps/api` and use `uvicorn main:app --host 0.0.0.0 --port $PORT`).
 
 ---
@@ -23,7 +25,8 @@ Make sure all the new config files are committed and pushed to your GitHub repo'
 5. Render will auto-detect the `render.yaml` — confirm these settings:
    - **Name:** highlight-reviewer-api
    - **Runtime:** Python
-   - **Build Command:** `pip install -r requirements.txt`
+   - **Build Command:** `bash scripts/render-build.sh`  
+     (installs Node 20, Poppler, runs `npm ci` + `npm run build`, then `pip install -r requirements.txt`)
    - **Start Command:** `cd apps/api && uvicorn main:app --host 0.0.0.0 --port $PORT`
    - **Plan:** Free
 6. Click **"Create Web Service"**
@@ -50,9 +53,8 @@ Make sure all the new config files are committed and pushed to your GitHub repo'
 2. Commit and push to `main`
 3. Go to your GitHub repo → **Actions** tab — you should see the workflow running
 4. Once it completes, go to your Render dashboard — a new deploy should be triggered
-5. Visit your Render service URL + `/health` to confirm it's live:
-   `https://highlight-reviewer-api.onrender.com/health`
-   Expected response: `{"status": "ok"}`
+5. Visit your Render service **root URL** for the UI (e.g. `https://your-service.onrender.com/`).
+6. Visit `/health` to confirm the API is live: `https://your-service.onrender.com/health` — expected: `{"status": "ok"}`
 
 ---
 
@@ -78,7 +80,7 @@ Workflow sends POST to Render Deploy Hook URL
        ↓
 Render pulls latest code from GitHub
        ↓
-Render runs: pip install -r requirements.txt
+Render runs: bash scripts/render-build.sh (frontend → static/, Python deps)
        ↓
 Render starts: cd apps/api && uvicorn main:app --host 0.0.0.0 --port $PORT
        ↓
