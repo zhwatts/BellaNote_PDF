@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tempfile
 from collections import defaultdict
 from contextlib import suppress
@@ -20,6 +21,7 @@ import slide_storage
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.requests import Request
 from pdf_processor import (
     count_pages,
     extract_highlights,
@@ -31,9 +33,41 @@ from pydantic import BaseModel, Field
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 STATIC_DIR = REPO_ROOT / "static"
 
+
+def _configure_logging() -> None:
+    """Ensure app logs appear in Render (uvicorn leaves root logger at WARNING by default)."""
+    fmt = "%(levelname)s %(name)s %(message)s"
+    try:
+        logging.basicConfig(
+            level=logging.INFO,
+            format=fmt,
+            stream=sys.stderr,
+            force=True,
+        )
+    except TypeError:
+        logging.basicConfig(level=logging.INFO, format=fmt, stream=sys.stderr)
+    logging.getLogger("bella_note").setLevel(logging.INFO)
+
+
+_configure_logging()
+
 app = FastAPI(title="Bella Note")
 
 log = logging.getLogger("bella_note.upload")
+
+
+@app.middleware("http")
+async def _log_upload_request_start(request: Request, call_next):
+    """Log as soon as the request hits the app (before multipart body is fully read)."""
+    path = request.url.path.rstrip("/") or "/"
+    if path == "/upload" and request.method == "POST":
+        cl = request.headers.get("content-length")
+        log.info(
+            "upload request start content-length=%s client=%s",
+            cl,
+            request.client.host if request.client else "?",
+        )
+    return await call_next(request)
 
 
 def _slide_render_dpi() -> int:
@@ -168,7 +202,7 @@ def _html_to_plain(html: str) -> str:
 
 @app.on_event("startup")
 def _startup() -> None:
-    logging.getLogger("bella_note").setLevel(logging.INFO)
+    _configure_logging()
     db.init_db()
 
 
@@ -199,6 +233,7 @@ def _purge_document_files(doc_id: int) -> None:
 @app.post("/upload")
 @app.post("/upload/")
 async def upload(files: list[UploadFile] = File(...)) -> dict:
+    log.info("upload handler entered file_count=%s", len(files))
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
     results: list[dict] = []
@@ -218,9 +253,16 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
         os.close(tmp_fd)
         try:
+            log.info("upload reading multipart body filename=%s", file.filename)
             data = await file.read()
+            log.info(
+                "upload read %s bytes filename=%s",
+                len(data),
+                file.filename,
+            )
             Path(tmp_path).write_bytes(data)
 
+            log.info("upload dispatching ingest thread filename=%s", file.filename)
             # Run CPU/IO-heavy work off the asyncio event loop so /health and
             # other requests are not blocked (avoids Render marking the instance unhealthy).
             result, file_warnings = await asyncio.to_thread(
@@ -230,10 +272,12 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
             )
             results.append(result)
             warnings.extend(file_warnings)
+            log.info("upload ingest finished filename=%s", file.filename)
         finally:
             with suppress(OSError):
                 os.unlink(tmp_path)
 
+    log.info("upload response ready results=%s", len(results))
     return {"results": results, "warnings": warnings}
 
 

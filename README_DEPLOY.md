@@ -44,6 +44,8 @@ The API uses **SQLite only when `DATABASE_URL` is unset**. On Render, set a **se
 
 **PDF uploads “hang” or 503 while uploading:** Render’s free tier has **512 MB RAM** and a **single worker** by default. Heavy PDF processing used to **block the event loop**, so **`/health` failed** during upload and Render returned **503**. The API now runs ingestion in a **background thread** so health checks stay green. If uploads are still slow or time out, set **`SLIDE_RENDER_DPI=100`** (or `96`) in the environment to rasterize faster, or use a smaller PDF / paid instance with more RAM and CPU.
 
+**Logs:** Uvicorn’s **access log line for `POST /upload` is written when the request finishes**, not when it starts—so a long upload may show **no** `POST /upload` until it completes. Look for app lines from **`bella_note.upload`**: `upload request start`, `upload read … bytes`, `ingest start`, etc. If you see **`upload request start`** but not **`upload read`**, the server is still receiving the multipart body (large file or slow link).
+
 **Local / non-Render:** put variables in a **`.env` file at the repo root** (see `.env.example`); the API loads it automatically via `python-dotenv` when the `database` package imports.
 
 Slide images and uploaded PDFs still live on the service **disk** (ephemeral on the free tier); only **metadata** is in Supabase.
