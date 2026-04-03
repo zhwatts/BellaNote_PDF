@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import re
 import shutil
@@ -30,6 +32,96 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 STATIC_DIR = REPO_ROOT / "static"
 
 app = FastAPI(title="Bella Note")
+
+log = logging.getLogger("bella_note.upload")
+
+
+def _slide_render_dpi() -> int:
+    """Lower DPI on Render (free tier) speeds rasterization and reduces OOM risk."""
+    raw = (os.environ.get("SLIDE_RENDER_DPI") or "").strip()
+    if raw.isdigit():
+        return max(72, min(300, int(raw)))
+    if (os.environ.get("RENDER") or "").lower() == "true":
+        return 110
+    return 150
+
+
+def _ingest_single_pdf(tmp_path: str, filename: str) -> tuple[dict, list[dict]]:
+    """
+    Blocking: extract highlights, render slides, DB rows, optional Storage upload.
+    Run via asyncio.to_thread so /health stays reachable on a single worker.
+    """
+    warnings: list[dict] = []
+    log.info("ingest start file=%s", filename)
+    raw_highlights = extract_highlights(tmp_path)
+    total_pages = count_pages(tmp_path)
+    by_page = _group_highlights_by_page(raw_highlights)
+    highlights_found = sum(len(v) for v in by_page.values())
+    log.info("ingest extracted highlights file=%s pages=%s", filename, total_pages)
+
+    doc_id, slide_dir = db.insert_document_record(
+        filename=filename,
+        original_path=None,
+        total_pages=total_pages,
+    )
+    dpi = _slide_render_dpi()
+    try:
+        db.ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
+        original_copy = db.ORIGINALS_DIR / f"{doc_id}.pdf"
+        shutil.copy2(tmp_path, original_copy)
+        db.update_document_original_path(doc_id, str(original_copy))
+
+        log.info(
+            "ingest rendering PNGs doc_id=%s dpi=%s dir=%s",
+            doc_id,
+            dpi,
+            slide_dir,
+        )
+        render_pdf_pages_to_png(tmp_path, slide_dir, dpi=dpi)
+        log.info("ingest render done doc_id=%s", doc_id)
+        if slide_storage.is_enabled():
+            log.info(
+                "ingest uploading to storage doc_id=%s pages=%s",
+                doc_id,
+                total_pages,
+            )
+            slide_storage.upload_pages_from_dir(doc_id, slide_dir, total_pages)
+            shutil.rmtree(slide_dir, ignore_errors=True)
+            slide_paths = [
+                slide_storage.db_path_for_page(doc_id, p)
+                for p in range(1, total_pages + 1)
+            ]
+        else:
+            slide_paths = [
+                str(slide_dir / f"page_{p}.png")
+                for p in range(1, total_pages + 1)
+            ]
+        db.insert_slides_and_highlights(doc_id, total_pages, slide_paths, by_page)
+        log.info("ingest complete doc_id=%s file=%s", doc_id, filename)
+    except Exception:
+        log.exception("ingest failed doc_id=%s file=%s", doc_id, filename)
+        _purge_document_files(doc_id)
+        raise
+
+    result = {
+        "document_id": doc_id,
+        "filename": filename,
+        "total_pages": total_pages,
+        "highlights_found": highlights_found,
+    }
+    if highlights_found == 0:
+        warnings.append(
+            {
+                "document_id": doc_id,
+                "filename": filename,
+                "message": (
+                    "No highlight annotations found. If this PDF was "
+                    "flattened or rasterized, highlights may be baked "
+                    "into the image and cannot be extracted."
+                ),
+            }
+        )
+    return result, warnings
 
 
 @app.get("/health")
@@ -76,6 +168,7 @@ def _html_to_plain(html: str) -> str:
 
 @app.on_event("startup")
 def _startup() -> None:
+    logging.getLogger("bella_note").setLevel(logging.INFO)
     db.init_db()
 
 
@@ -128,64 +221,15 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
             data = await file.read()
             Path(tmp_path).write_bytes(data)
 
-            raw_highlights = extract_highlights(tmp_path)
-            total_pages = count_pages(tmp_path)
-            by_page = _group_highlights_by_page(raw_highlights)
-            highlights_found = sum(len(v) for v in by_page.values())
-
-            doc_id, slide_dir = db.insert_document_record(
-                filename=file.filename,
-                original_path=None,
-                total_pages=total_pages,
+            # Run CPU/IO-heavy work off the asyncio event loop so /health and
+            # other requests are not blocked (avoids Render marking the instance unhealthy).
+            result, file_warnings = await asyncio.to_thread(
+                _ingest_single_pdf,
+                tmp_path,
+                file.filename,
             )
-            try:
-                db.ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
-                original_copy = db.ORIGINALS_DIR / f"{doc_id}.pdf"
-                shutil.copy2(tmp_path, original_copy)
-                db.update_document_original_path(doc_id, str(original_copy))
-
-                render_pdf_pages_to_png(tmp_path, slide_dir)
-                if slide_storage.is_enabled():
-                    slide_storage.upload_pages_from_dir(
-                        doc_id, slide_dir, total_pages
-                    )
-                    shutil.rmtree(slide_dir, ignore_errors=True)
-                    slide_paths = [
-                        slide_storage.db_path_for_page(doc_id, p)
-                        for p in range(1, total_pages + 1)
-                    ]
-                else:
-                    slide_paths = [
-                        str(slide_dir / f"page_{p}.png")
-                        for p in range(1, total_pages + 1)
-                    ]
-                db.insert_slides_and_highlights(
-                    doc_id, total_pages, slide_paths, by_page
-                )
-            except Exception:
-                _purge_document_files(doc_id)
-                raise
-
-            results.append(
-                {
-                    "document_id": doc_id,
-                    "filename": file.filename,
-                    "total_pages": total_pages,
-                    "highlights_found": highlights_found,
-                }
-            )
-            if highlights_found == 0:
-                warnings.append(
-                    {
-                        "document_id": doc_id,
-                        "filename": file.filename,
-                        "message": (
-                            "No highlight annotations found. If this PDF was "
-                            "flattened or rasterized, highlights may be baked "
-                            "into the image and cannot be extracted."
-                        ),
-                    }
-                )
+            results.append(result)
+            warnings.extend(file_warnings)
         finally:
             with suppress(OSError):
                 os.unlink(tmp_path)

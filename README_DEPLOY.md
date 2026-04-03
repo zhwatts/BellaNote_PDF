@@ -42,6 +42,8 @@ The API uses **SQLite only when `DATABASE_URL` is unset**. On Render, set a **se
 
 **Slide images (recommended on Render):** Set **`SUPABASE_URL`** (project URL, `https://…supabase.co`) and **`SUPABASE_SERVICE_ROLE_KEY`** (Dashboard → **Project Settings → API**). The app uploads PNGs to the **`bella-note-slides`** bucket and serves them via redirect to a public URL. Create the bucket once in Supabase (or rely on the migration in-repo / dashboard) so uploads succeed.
 
+**PDF uploads “hang” or 503 while uploading:** Render’s free tier has **512 MB RAM** and a **single worker** by default. Heavy PDF processing used to **block the event loop**, so **`/health` failed** during upload and Render returned **503**. The API now runs ingestion in a **background thread** so health checks stay green. If uploads are still slow or time out, set **`SLIDE_RENDER_DPI=100`** (or `96`) in the environment to rasterize faster, or use a smaller PDF / paid instance with more RAM and CPU.
+
 **Local / non-Render:** put variables in a **`.env` file at the repo root** (see `.env.example`); the API loads it automatically via `python-dotenv` when the `database` package imports.
 
 Slide images and uploaded PDFs still live on the service **disk** (ephemeral on the free tier); only **metadata** is in Supabase.
