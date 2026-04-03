@@ -26,7 +26,7 @@ Make sure all the new config files are committed and pushed to your GitHub repo'
    - **Name:** highlight-reviewer-api
    - **Runtime:** Python
    - **Build Command:** `bash scripts/render-build.sh`  
-     (installs Node 20, Poppler, runs `npm ci` + `npm run build`, then `pip install -r requirements.txt`)
+     (runs `npm ci` + `npm run build` → `static/`, then `pip install -r requirements.txt`. Render supplies Node from `package.json` `engines`; do not use `apt-get` in the build — the image is read-only.)
    - **Start Command:** `cd apps/api && uvicorn main:app --host 0.0.0.0 --port $PORT`
    - **Plan:** Free
 6. Click **"Create Web Service"**
@@ -66,6 +66,7 @@ Make sure all the new config files are committed and pushed to your GitHub repo'
   - Rendered slide images (`data/slides/`) will be wiped on every deploy
   - **This app is designed for local use.** For persistent cloud hosting, a database migration to PostgreSQL + cloud file storage (e.g. Supabase + Cloudflare R2) would be required.
 - For personal/demo use, the free tier works fine as long as you are aware of this limitation.
+- **Poppler (`pdf2image`):** Native Render Python services do not allow installing system packages during build. If page rendering fails at runtime with errors about `pdftoppm` / Poppler, switch to a **Docker**-based deploy that installs `poppler-utils`, or rely on code paths that use PyMuPDF only.
 
 ---
 
