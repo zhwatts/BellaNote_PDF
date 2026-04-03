@@ -124,6 +124,14 @@ npm run lint:fix
 
 GitHub Actions (`.github/workflows/lint.yml`) runs Ruff, ESLint, and the production build on push and pull requests.
 
+### Vite, Rolldown, and CI
+
+Vite 8 uses **Rolldown**, which depends on **platform-specific native bindings**. The lockfile reflects the machine where you last ran `npm install`; GitHub Actions uses **Linux x64**. Without an explicit Linux binding entry, `npm ci` on CI can succeed locally on macOS but fail in Actions with “Cannot find native binding” / missing `@rolldown/binding-linux-x64-gnu`.
+
+This repo pins **`@rolldown/binding-linux-x64-gnu`** under **`optionalDependencies`** in `frontend/package.json` (same version as the `rolldown` required by Vite) so Linux CI installs that package while macOS skips it.
+
+**When upgrading Vite:** align that optional dependency with the Rolldown version Vite pulls in (check `npm ls rolldown` or `package-lock.json`), run `npm install` at the repo root, and commit the updated lockfile. If you prefer to avoid native bindings altogether, you can instead standardize on **Vite 6** (Rollup-based) and drop the Rolldown binding workaround.
+
 ## Project layout
 
 ```text
