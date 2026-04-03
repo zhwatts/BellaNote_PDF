@@ -80,7 +80,7 @@ Shared at repo root: **`data/`** (runtime), **`static/`** (production UI build o
 With **`DATABASE_URL`** set (and empty/unset for plain SQLite), the API uses **psycopg** against your Postgres database. The app still stores **PDF originals and slide PNGs on disk** under `data/`; only **documents / slides / highlights metadata** live in Postgres.
 
 1. Create a Supabase project and run the SQL in `supabase/migrations/20260403180000_bella_note_initial.sql` (or apply migrations from the Supabase dashboard / CLI).
-2. In Supabase: **Project Settings → Database**, copy the **URI** connection string (use **Session pooler** or **Direct connection**; include `?sslmode=require` if not already present).
+2. In Supabase: **Project Settings → Database → Connection string → URI**. Prefer **Session pooler** (Session mode) if you deploy anywhere without IPv6 (e.g. Render); **Direct** can fail with “network is unreachable” there. Include `?sslmode=require` if not already in the string.
 3. Add the URI to a **`.env` file at the repo root** (copy from `.env.example`), for example:
 
    ```bash
@@ -95,6 +95,8 @@ With **`DATABASE_URL`** set (and empty/unset for plain SQLite), the API uses **p
    ```
 
    Optional: put overrides in `apps/api/.env` (loaded after the root `.env`).
+
+5. **Slide images on a host without persistent disk (e.g. Render):** set **`SUPABASE_URL`** and **`SUPABASE_SERVICE_ROLE_KEY`** (see `.env.example`). Slides are stored in the **`bella-note-slides`** Storage bucket; the UI still uses `/slides/...` and the API redirects to the public object URL.
 
 ### API documentation
 

@@ -36,9 +36,13 @@ Make sure all the new config files are committed and pushed to your GitHub repo'
 
 The API uses **SQLite only when `DATABASE_URL` is unset**. On Render, set a **secret** environment variable:
 
-- **`DATABASE_URL`** — Postgres connection URI from Supabase (**Settings → Database → Connection string**, URI tab). Use the **pooler** or **direct** URL and ensure `sslmode=require` is present.
+- **`DATABASE_URL`** — Postgres URI from Supabase (**Settings → Database → Connection string** → **URI**).
 
-**Local / non-Render:** put the same variable in a **`.env` file at the repo root** (see `.env.example`); the API loads it automatically via `python-dotenv` when the `database` package imports.
+**Important (Render / IPv4):** Use **Session pooler** (Session mode), **not** “Direct connection.” The direct host (`db.*.supabase.co` on port **5432**) often resolves to **IPv6**; Render’s network often cannot reach IPv6 (`Network is unreachable`). The **Session pooler** uses a `*.pooler.supabase.com` host and port **6543** (see Supabase UI) and works over **IPv4**. Paste your DB password into the template; keep `?sslmode=require` if shown.
+
+**Slide images (recommended on Render):** Set **`SUPABASE_URL`** (project URL, `https://…supabase.co`) and **`SUPABASE_SERVICE_ROLE_KEY`** (Dashboard → **Project Settings → API**). The app uploads PNGs to the **`bella-note-slides`** bucket and serves them via redirect to a public URL. Create the bucket once in Supabase (or rely on the migration in-repo / dashboard) so uploads succeed.
+
+**Local / non-Render:** put variables in a **`.env` file at the repo root** (see `.env.example`); the API loads it automatically via `python-dotenv` when the `database` package imports.
 
 Slide images and uploaded PDFs still live on the service **disk** (ephemeral on the free tier); only **metadata** is in Supabase.
 

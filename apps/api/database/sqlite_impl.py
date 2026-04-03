@@ -103,9 +103,13 @@ def insert_document_record(
     total_pages: int,
 ) -> tuple[int, Path]:
     """
-    Insert documents row, create data/slides/{id}/, return (doc_id, slide_dir).
+    Insert documents row, create data/slides/{id}/ (or temp dir for Supabase upload).
     Call render_pdf_pages_to_png into slide_dir, then insert_slides_and_highlights.
     """
+    import tempfile
+
+    from slide_storage import is_enabled as _slides_remote
+
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -121,12 +125,21 @@ def insert_document_record(
             (filename, original_path, total_pages, None),
         )
         doc_id = int(cur.lastrowid)
-        slide_dir = SLIDES_ROOT / str(doc_id)
-        slide_dir.mkdir(parents=True, exist_ok=True)
-        cur.execute(
-            "UPDATE documents SET slide_image_dir = ? WHERE id = ?",
-            (str(slide_dir), doc_id),
-        )
+        if _slides_remote():
+            slide_dir = Path(
+                tempfile.mkdtemp(prefix=f"bella_slides_{doc_id}_"),
+            )
+            cur.execute(
+                "UPDATE documents SET slide_image_dir = ? WHERE id = ?",
+                ("storage", doc_id),
+            )
+        else:
+            slide_dir = SLIDES_ROOT / str(doc_id)
+            slide_dir.mkdir(parents=True, exist_ok=True)
+            cur.execute(
+                "UPDATE documents SET slide_image_dir = ? WHERE id = ?",
+                (str(slide_dir), doc_id),
+            )
         return doc_id, slide_dir
 
 
@@ -205,16 +218,18 @@ def insert_highlights_for_document(doc_id: int, highlights_by_page: dict[int, li
 def insert_slides_and_highlights(
     doc_id: int,
     total_pages: int,
-    slide_dir: Path,
+    slide_paths: list[str],
     highlights_by_page: dict[int, list[str]],
 ) -> None:
-    """Insert slide rows and highlights (PNGs must already exist under slide_dir)."""
+    """Insert slide rows and highlights; slide_paths[i] is image for page i+1."""
+    if len(slide_paths) != total_pages:
+        raise ValueError("slide_paths length must match total_pages")
     with get_connection() as conn:
         cur = conn.cursor()
         for page_num in range(1, total_pages + 1):
             texts = highlights_by_page.get(page_num, [])
             has_h = 1 if texts else 0
-            image_path = str(slide_dir / f"page_{page_num}.png")
+            image_path = slide_paths[page_num - 1]
             cur.execute(
                 """
                 INSERT INTO slides (document_id, page_number, image_path, has_highlights)
@@ -231,6 +246,21 @@ def insert_slides_and_highlights(
                     """,
                     (slide_id, doc_id, text),
                 )
+
+
+def get_slide_image_paths_for_document(doc_id: int) -> list[str]:
+    """All slides.image_path values for a document (for storage cleanup)."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT image_path FROM slides
+            WHERE document_id = ?
+            ORDER BY page_number
+            """,
+            (doc_id,),
+        )
+        return [str(r["image_path"]) for r in cur.fetchall()]
 
 
 def document_exists(doc_id: int) -> bool:

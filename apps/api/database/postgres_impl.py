@@ -42,8 +42,20 @@ def ensure_data_dirs() -> None:
 def init_db() -> None:
     """Verify DB connectivity; schema is applied via Supabase migrations."""
     ensure_data_dirs()
-    with psycopg.connect(_dsn()) as conn:
-        conn.execute("SELECT 1")
+    try:
+        with psycopg.connect(_dsn()) as conn:
+            conn.execute("SELECT 1")
+    except psycopg.OperationalError as e:
+        err = str(e).lower()
+        if "network is unreachable" in err or "no route to host" in err:
+            raise RuntimeError(
+                "Postgres connection failed (often IPv6 vs IPv4). Supabase 'Direct connection' "
+                "can resolve to IPv6; Render and many hosts only reach IPv4. Use the "
+                "Session pooler URI from Supabase (Project Settings → Database → "
+                "Connection string → Session mode; host *.pooler.supabase.com, port 6543). "
+                "See README_DEPLOY.md."
+            ) from e
+        raise
 
 
 @contextmanager
@@ -65,6 +77,10 @@ def insert_document_record(
     original_path: str | None,
     total_pages: int,
 ) -> tuple[int, Path]:
+    import tempfile
+
+    from slide_storage import is_enabled as _slides_remote
+
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -83,13 +99,23 @@ def insert_document_record(
             row = cur.fetchone()
             assert row is not None
             doc_id = int(row["id"])
-        slide_dir = SLIDES_ROOT / str(doc_id)
-        slide_dir.mkdir(parents=True, exist_ok=True)
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE documents SET slide_image_dir = %s WHERE id = %s",
-                (str(slide_dir), doc_id),
+        if _slides_remote():
+            slide_dir = Path(
+                tempfile.mkdtemp(prefix=f"bella_slides_{doc_id}_"),
             )
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE documents SET slide_image_dir = %s WHERE id = %s",
+                    ("storage", doc_id),
+                )
+        else:
+            slide_dir = SLIDES_ROOT / str(doc_id)
+            slide_dir.mkdir(parents=True, exist_ok=True)
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE documents SET slide_image_dir = %s WHERE id = %s",
+                    (str(slide_dir), doc_id),
+                )
         return doc_id, slide_dir
 
 
@@ -169,15 +195,17 @@ def insert_highlights_for_document(doc_id: int, highlights_by_page: dict[int, li
 def insert_slides_and_highlights(
     doc_id: int,
     total_pages: int,
-    slide_dir: Path,
+    slide_paths: list[str],
     highlights_by_page: dict[int, list[str]],
 ) -> None:
+    if len(slide_paths) != total_pages:
+        raise ValueError("slide_paths length must match total_pages")
     with get_connection() as conn:
         with conn.cursor() as cur:
             for page_num in range(1, total_pages + 1):
                 texts = highlights_by_page.get(page_num, [])
                 has_h = bool(texts)
-                image_path = str(slide_dir / f"page_{page_num}.png")
+                image_path = slide_paths[page_num - 1]
                 cur.execute(
                     """
                     INSERT INTO slides (document_id, page_number, image_path, has_highlights)
@@ -197,6 +225,20 @@ def insert_slides_and_highlights(
                         """,
                         (slide_id, doc_id, text),
                     )
+
+
+def get_slide_image_paths_for_document(doc_id: int) -> list[str]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT image_path FROM slides
+                WHERE document_id = %s
+                ORDER BY page_number
+                """,
+                (doc_id,),
+            )
+            return [str(r["image_path"]) for r in cur.fetchall()]
 
 
 def document_exists(doc_id: int) -> bool:

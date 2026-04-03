@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import Annotated
 
 import database as db
+import slide_storage
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pdf_processor import (
     count_pages,
@@ -86,7 +87,9 @@ def _group_highlights_by_page(items: list[dict]) -> dict[int, list[str]]:
 
 
 def _purge_document_files(doc_id: int) -> None:
-    """Remove DB rows, slide PNG folder, and stored original PDF."""
+    """Remove DB rows, slide PNG folder or Supabase objects, and stored original PDF."""
+    slide_paths = db.get_slide_image_paths_for_document(doc_id)
+    slide_storage.delete_objects_for_paths(slide_paths)
     original_path = db.get_document_original_path(doc_id)
     ok, slide_dir = db.delete_document(doc_id)
     if not ok:
@@ -94,7 +97,7 @@ def _purge_document_files(doc_id: int) -> None:
     if original_path:
         Path(original_path).unlink(missing_ok=True)
     (db.ORIGINALS_DIR / f"{doc_id}.pdf").unlink(missing_ok=True)
-    if slide_dir:
+    if slide_dir and slide_dir != "storage":
         p = Path(slide_dir)
         if p.is_dir():
             shutil.rmtree(p, ignore_errors=True)
@@ -142,7 +145,23 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
                 db.update_document_original_path(doc_id, str(original_copy))
 
                 render_pdf_pages_to_png(tmp_path, slide_dir)
-                db.insert_slides_and_highlights(doc_id, total_pages, slide_dir, by_page)
+                if slide_storage.is_enabled():
+                    slide_storage.upload_pages_from_dir(
+                        doc_id, slide_dir, total_pages
+                    )
+                    shutil.rmtree(slide_dir, ignore_errors=True)
+                    slide_paths = [
+                        slide_storage.db_path_for_page(doc_id, p)
+                        for p in range(1, total_pages + 1)
+                    ]
+                else:
+                    slide_paths = [
+                        str(slide_dir / f"page_{p}.png")
+                        for p in range(1, total_pages + 1)
+                    ]
+                db.insert_slides_and_highlights(
+                    doc_id, total_pages, slide_paths, by_page
+                )
             except Exception:
                 _purge_document_files(doc_id)
                 raise
@@ -222,12 +241,20 @@ def get_document_slides(doc_id: int) -> list[dict]:
     return db.get_slides_with_highlights(doc_id)
 
 
-@app.get("/slides/{doc_id}/{page_number}")
-def get_slide_image(doc_id: int, page_number: int) -> FileResponse:
+@app.get("/slides/{doc_id}/{page_number}", response_model=None)
+def get_slide_image(doc_id: int, page_number: int) -> FileResponse | RedirectResponse:
     path = db.get_slide_image_path(doc_id, page_number)
-    if not path or not Path(path).is_file():
+    if not path:
         raise HTTPException(status_code=404, detail="Slide image not found")
-    return FileResponse(path, media_type="image/png")
+    if isinstance(path, str) and path.startswith(slide_storage.STORAGE_PREFIX):
+        return RedirectResponse(
+            url=slide_storage.public_url_from_db_path(path),
+            status_code=302,
+        )
+    p = Path(path)
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="Slide image not found")
+    return FileResponse(p, media_type="image/png")
 
 
 @app.post("/slides/{slide_id}/highlights")
