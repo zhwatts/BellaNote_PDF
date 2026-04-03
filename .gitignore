@@ -7,6 +7,7 @@ env/
 !.env.example
 __pycache__/
 *.py[cod]
+*.pyo
 *$py.class
 *.so
 .Python
@@ -32,6 +33,7 @@ static/
 
 # --- Local data (SQLite, rendered slides, stored PDFs) ---
 data/db.sqlite
+data/slides/
 data/db.sqlite-*
 data/db.sqlite-journal
 data/slides/**/*
@@ -42,6 +44,8 @@ data/originals/**/*
 # --- OS & editors ---
 .DS_Store
 Thumbs.db
+.cursor/
+.vscode/
 .idea/
 *.swp
 *.swo

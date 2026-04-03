@@ -31,6 +31,11 @@ STATIC_DIR = REPO_ROOT / "static"
 app = FastAPI(title="Bella Note")
 
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
 class SlideHideBody(BaseModel):
     hidden: bool
 
