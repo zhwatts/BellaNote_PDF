@@ -1,12 +1,12 @@
 # Bella Note
 
-A **local-first** web app for reviewing PDFs (often exported from PowerPoint): it extracts highlighted regions and annotations, shows each page as a slide image next to editable notes, and keeps everything in **SQLite** on your machine.
+A **local-first** web app for reviewing PDFs (often exported from PowerPoint): it extracts highlighted regions and annotations, shows each page as a slide image next to editable notes, and stores metadata in **SQLite** by default or in **Postgres (Supabase)** when `DATABASE_URL` is set.
 
 This repository is a **monorepo** (single Git repo):
 
 | Package | Path | Role |
 |--------|------|------|
-| **API** | `apps/api/` | FastAPI, PDF processing, SQLite (`data/` at repo root) |
+| **API** | `apps/api/` | FastAPI, PDF processing, SQLite or Postgres (`data/` at repo root for files) |
 | **Web** | `frontend/` | React + Vite (npm workspace) |
 
 Shared at repo root: **`data/`** (runtime), **`static/`** (production UI build output), **`pyproject.toml`** (Ruff), **`package.json`** (npm workspaces).
@@ -17,7 +17,7 @@ Shared at repo root: **`data/`** (runtime), **`static/`** (production UI build o
 |--------|------------|
 | API | [FastAPI](https://fastapi.tiangolo.com/), Uvicorn |
 | PDF / slides | PyMuPDF, pdfplumber, pdf2image (Poppler), Pillow |
-| DB | SQLite (`data/db.sqlite`, WAL mode) |
+| DB | SQLite (`data/db.sqlite`, WAL) **or** Postgres via `DATABASE_URL` (e.g. Supabase) |
 | UI | React 19, Vite, Ant Design, [TipTap](https://tiptap.dev/) (WYSIWYG notes), dnd-kit (sidebar order) |
 
 ## Features
@@ -74,6 +74,27 @@ Shared at repo root: **`data/`** (runtime), **`static/`** (production UI build o
    ```
 
 6. Open **http://localhost:8000** in your browser.
+
+### Optional: Supabase / Postgres
+
+With **`DATABASE_URL`** set (and empty/unset for plain SQLite), the API uses **psycopg** against your Postgres database. The app still stores **PDF originals and slide PNGs on disk** under `data/`; only **documents / slides / highlights metadata** live in Postgres.
+
+1. Create a Supabase project and run the SQL in `supabase/migrations/20260403180000_bella_note_initial.sql` (or apply migrations from the Supabase dashboard / CLI).
+2. In Supabase: **Project Settings → Database**, copy the **URI** connection string (use **Session pooler** or **Direct connection**; include `?sslmode=require` if not already present).
+3. Add the URI to a **`.env` file at the repo root** (copy from `.env.example`), for example:
+
+   ```bash
+   cp .env.example .env
+   # Edit .env and set DATABASE_URL=postgresql://...
+   ```
+
+4. Start the API as usual; variables from `.env` load automatically:
+
+   ```bash
+   cd apps/api && python main.py
+   ```
+
+   Optional: put overrides in `apps/api/.env` (loaded after the root `.env`).
 
 ### API documentation
 

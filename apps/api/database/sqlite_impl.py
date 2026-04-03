@@ -1,4 +1,4 @@
-"""SQLite schema and helpers (WAL mode)."""
+"""SQLite schema and helpers (WAL mode). Local default when DATABASE_URL is unset."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-# Monorepo root: apps/api/*.py -> parent.parent.parent
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# Monorepo root: apps/api/database/*.py -> parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = REPO_ROOT / "data"
 DB_PATH = DATA_DIR / "db.sqlite"
 SLIDES_ROOT = DATA_DIR / "slides"

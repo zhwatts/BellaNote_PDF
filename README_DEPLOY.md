@@ -32,6 +32,16 @@ Make sure all the new config files are committed and pushed to your GitHub repo'
 6. Click **"Create Web Service"**
 7. Wait for the first deploy to complete (takes 2-4 minutes)
 
+### 2b. Database on Render (Supabase Postgres)
+
+The API uses **SQLite only when `DATABASE_URL` is unset**. On Render, set a **secret** environment variable:
+
+- **`DATABASE_URL`** — Postgres connection URI from Supabase (**Settings → Database → Connection string**, URI tab). Use the **pooler** or **direct** URL and ensure `sslmode=require` is present.
+
+**Local / non-Render:** put the same variable in a **`.env` file at the repo root** (see `.env.example`); the API loads it automatically via `python-dotenv` when the `database` package imports.
+
+Slide images and uploaded PDFs still live on the service **disk** (ephemeral on the free tier); only **metadata** is in Supabase.
+
 ### 3. Get Your Render Deploy Hook URL
 
 1. In your Render service dashboard, go to **Settings**

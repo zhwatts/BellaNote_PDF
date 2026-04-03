@@ -30,7 +30,7 @@ Python dependencies live in `apps/api/requirements.txt`; dev tooling (Ruff) in `
 
 Organize the project as a **monorepo**:
 
-- **`apps/api/`** — FastAPI entrypoint (`main.py`), `database.py`, `pdf_processor.py`, Python requirements. **Run the API with current working directory `apps/api`** so `import database` / `import pdf_processor` resolve.
+- **`apps/api/`** — FastAPI entrypoint (`main.py`), `database/` package (`sqlite_impl` / `postgres_impl`), `pdf_processor.py`, Python requirements. **Run the API with current working directory `apps/api`** so `import database` / `import pdf_processor` resolve.
 - **`frontend/`** — Vite + React app (npm workspace package named `frontend`).
 - **Repository root** — shared runtime and tooling:
   - **`data/`** — SQLite DB, rendered slide PNGs, **stored original PDFs** (`data/originals/{doc_id}.pdf`). Gitignore database and binaries; keep `.gitkeep` in empty dirs if useful.
