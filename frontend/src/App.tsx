@@ -312,8 +312,8 @@ function SortableDocRow({
           className="doc-delete-confirm-alert"
         />
         <Paragraph className="doc-delete-confirm-body">
-          You&apos;re about to delete the document, and all associated notes from
-          the system. Are you sure you want to continue?
+          You&apos;re about to delete the document, and all associated notes
+          from the system. Are you sure you want to continue?
         </Paragraph>
       </Modal>
       <Modal
@@ -323,11 +323,7 @@ function SortableDocRow({
         maskClosable={!deleting}
         onCancel={() => !deleting && closeDeleteModals()}
         footer={[
-          <Button
-            key="no"
-            disabled={deleting}
-            onClick={closeDeleteModals}
-          >
+          <Button key="no" disabled={deleting} onClick={closeDeleteModals}>
             No
           </Button>,
           <Button
@@ -623,9 +619,7 @@ export default function App() {
     let list = filterSlides(slides, hideNoHl, starredOnly);
     const q = slideSearch.trim().toLowerCase();
     if (q) {
-      list = list.filter((s) =>
-        (s.full_text ?? "").toLowerCase().includes(q),
-      );
+      list = list.filter((s) => (s.full_text ?? "").toLowerCase().includes(q));
     }
     return list;
   }, [slides, hideNoHl, starredOnly, slideSearch]);
@@ -658,9 +652,7 @@ export default function App() {
   /** Oldest job at top of footer, newest at bottom (job_id order). */
   const importJobEntriesSorted = useMemo(
     () =>
-      Object.entries(importJobUi).sort(
-        (a, b) => Number(a[0]) - Number(b[0]),
-      ),
+      Object.entries(importJobUi).sort((a, b) => Number(a[0]) - Number(b[0])),
     [importJobUi],
   );
 
@@ -709,9 +701,7 @@ export default function App() {
         }
         try {
           const outcomes = await Promise.all(
-            batch.map((j) =>
-              pollImportJob(j.job_id, 900, mergeImportPoll),
-            ),
+            batch.map((j) => pollImportJob(j.job_id, 900, mergeImportPoll)),
           );
           let lastDocId: number | undefined;
           let failCount = 0;
@@ -834,9 +824,7 @@ export default function App() {
         prev.map((s) => ({
           ...s,
           highlights: s.highlights.map((h) =>
-            h.id === highlightId ?
-              { ...h, is_very_important: starred }
-            : h,
+            h.id === highlightId ? { ...h, is_very_important: starred } : h,
           ),
         })),
       );
@@ -1049,211 +1037,210 @@ export default function App() {
       <div className="app-sidebar-panel">
         <div className="app-sider-header">
           <div className="app-sider-header-inner">
-                <Title
-                  level={5}
-                  className="app-sider-brand"
-                  style={{ margin: "0 0 12px" }}
-                >
-                  Bella Note
-                </Title>
-                <Flex gap={8} className="app-sider-toolbar" align="center">
-                  <Tooltip title="Import new PDFs">
-                    <Button
-                      type="primary"
-                      className="app-sider-tool-import"
-                      icon={<UploadOutlined />}
-                      loading={uploading}
-                      disabled={processingRescan || exporting}
-                      onClick={onUploadPick}
-                    >
-                      Import New
-                    </Button>
-                  </Tooltip>
-                  <Tooltip title="Export selected">
-                    <Button
-                      className="app-sider-tool-export"
-                      icon={<ExportOutlined />}
-                      loading={exporting}
-                      disabled={
-                        uploading ||
-                        rescanning ||
-                        exportCheckedIds.size === 0 ||
-                        exporting
-                      }
-                      onClick={() => void exportSelected()}
-                      aria-label="Export selected"
-                    />
-                  </Tooltip>
-                </Flex>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="application/pdf,.pdf"
-                  multiple
-                  hidden
-                  disabled={uploading || processingRescan || exporting}
-                  onChange={(e) => void onFiles(e)}
-                />
-              </div>
-              <div className="app-sider-divider" role="separator" />
-            </div>
-            <div className="app-sider-middle">
-              <div className="app-sider-doc-scroll">
-                {reorderingDocuments ?
-                  <div
-                    className="doc-list-reorder-status"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <LoadingOutlined spin aria-hidden />
-                    <Text type="secondary">Saving order…</Text>
-                  </div>
-                : null}
-                {loadingDocs && docs.length === 0 ?
-                  <div
-                    className="doc-list-placeholder-row"
-                    aria-busy="true"
-                    aria-live="polite"
-                  >
-                    <span className="doc-list-placeholder-drag" aria-hidden />
-                    <div className="doc-list-placeholder-body">
-                      <LoadingOutlined
-                        className="doc-list-placeholder-icon"
-                        spin
-                        aria-hidden
-                      />
-                      <Text type="secondary">Loading documents…</Text>
-                    </div>
-                  </div>
-                : null}
-                {docs.length === 0 &&
-                !uploading &&
-                !loadingDocs &&
-                Object.keys(importJobUi).length === 0 ?
-                  <div className="doc-list-empty">No PDFs yet</div>
-                : docs.length > 0 ?
-                  <DndContext
-                    sensors={sensors}
-                    collisionDetection={closestCenter}
-                    onDragEnd={(e) => void onDocumentsDragEnd(e)}
-                  >
-                    <SortableContext
-                      items={docs.map((d) => d.id)}
-                      strategy={verticalListSortingStrategy}
-                    >
-                      <div className="doc-sortable-list">
-                        {docs.map((d) => (
-                          <SortableDocRow
-                            key={d.id}
-                            doc={d}
-                            selected={selectedId === d.id}
-                            exportChecked={exportCheckedIds.has(d.id)}
-                            onSelect={() => selectDocument(d.id)}
-                            onDelete={() => deleteDocument(d.id)}
-                            onExportCheckChange={(checked) =>
-                              setExportChecked(d.id, checked)
-                            }
-                            deleting={deletingDocId === d.id}
-                            disableDrag={reorderingDocuments}
-                            hiddenDuringImport={hiddenImportDocIds.has(d.id)}
-                          />
-                        ))}
-                      </div>
-                    </SortableContext>
-                  </DndContext>
-                : null}
-              </div>
-            </div>
-            {importJobEntriesSorted.length > 0 ?
-              <div
-                className="app-sider-import-footer"
-                aria-label="Imports in progress"
-              >
-                {importJobEntriesSorted.map(([idStr, row]) => {
-                  const jobId = Number(idStr);
-                  const pct =
-                    row.progress_percent != null &&
-                    Number.isFinite(row.progress_percent) ?
-                      Math.round(row.progress_percent)
-                    : undefined;
-                  const cur = row.progress_current;
-                  const tot = row.progress_total;
-                  const hasRatio =
-                    cur != null && tot != null && tot > 0;
-                  const remaining =
-                    hasRatio && cur != null && tot != null ?
-                      Math.max(0, tot - cur)
-                    : null;
-                  return (
-                    <div
-                      key={jobId}
-                      className="doc-list-import-row"
-                      role="status"
-                      aria-live="polite"
-                      aria-busy={
-                        row.status !== "completed" &&
-                        row.status !== "failed"
-                      }
-                    >
-                      <div className="doc-list-import-body">
-                        <Text
-                          ellipsis
-                          className="doc-list-import-filename"
-                          title={row.filename}
-                        >
-                          {row.filename}
-                        </Text>
-                        {pct != null ?
-                          <Progress percent={pct} size="small" />
-                        : <Progress
-                            percent={0}
-                            status="active"
-                            size="small"
-                            showInfo={false}
-                          />
-                        }
-                        <div className="doc-list-import-meta">
-                          <Text
-                            type="secondary"
-                            className="doc-list-import-label"
-                          >
-                            {row.progress_label ?? "Working…"}
-                          </Text>
-                          {hasRatio && cur != null && tot != null ?
-                            <Text
-                              type="secondary"
-                              className="doc-list-import-count"
-                            >
-                              {cur} / {tot}
-                              {remaining != null && remaining > 0 ?
-                                ` (${remaining} left)`
-                              : null}
-                            </Text>
-                          : null}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            : null}
-            <div className="app-sider-theme-footer">
-              <Tooltip
-                title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-              >
+            <Title
+              level={5}
+              className="app-sider-brand"
+              style={{ margin: "0 0 12px" }}
+            >
+              Bella Note
+            </Title>
+            <Flex gap={8} className="app-sider-toolbar" align="center">
+              <Tooltip title="Add PDFs">
                 <Button
-                  type="text"
-                  size="small"
-                  block
-                  className="app-sider-theme-toggle"
-                  icon={isDark ? <SunOutlined /> : <MoonOutlined />}
-                  onClick={toggleTheme}
-                  aria-label={
-                    isDark ? "Switch to light theme" : "Switch to dark theme"
+                  type="primary"
+                  className="app-sider-tool-import"
+                  icon={<UploadOutlined />}
+                  loading={uploading}
+                  disabled={processingRescan || exporting}
+                  onClick={onUploadPick}
+                >
+                  Add PDFs
+                </Button>
+              </Tooltip>
+              <Tooltip title="Export selected">
+                <Button
+                  className="app-sider-tool-export"
+                  icon={<ExportOutlined />}
+                  loading={exporting}
+                  disabled={
+                    uploading ||
+                    rescanning ||
+                    exportCheckedIds.size === 0 ||
+                    exporting
                   }
+                  onClick={() => void exportSelected()}
+                  aria-label="Export selected"
                 />
               </Tooltip>
-            </div>
+            </Flex>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              multiple
+              hidden
+              disabled={uploading || processingRescan || exporting}
+              onChange={(e) => void onFiles(e)}
+            />
+          </div>
+          <div className="app-sider-divider" role="separator" />
+        </div>
+        <div className="app-sider-middle">
+          <div className="app-sider-doc-scroll">
+            {reorderingDocuments ?
+              <div
+                className="doc-list-reorder-status"
+                role="status"
+                aria-live="polite"
+              >
+                <LoadingOutlined spin aria-hidden />
+                <Text type="secondary">Saving order…</Text>
+              </div>
+            : null}
+            {loadingDocs && docs.length === 0 ?
+              <div
+                className="doc-list-placeholder-row"
+                aria-busy="true"
+                aria-live="polite"
+              >
+                <span className="doc-list-placeholder-drag" aria-hidden />
+                <div className="doc-list-placeholder-body">
+                  <LoadingOutlined
+                    className="doc-list-placeholder-icon"
+                    spin
+                    aria-hidden
+                  />
+                  <Text type="secondary">Loading documents…</Text>
+                </div>
+              </div>
+            : null}
+            {(
+              docs.length === 0 &&
+              !uploading &&
+              !loadingDocs &&
+              Object.keys(importJobUi).length === 0
+            ) ?
+              <div className="doc-list-empty">No PDFs yet</div>
+            : docs.length > 0 ?
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={(e) => void onDocumentsDragEnd(e)}
+              >
+                <SortableContext
+                  items={docs.map((d) => d.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="doc-sortable-list">
+                    {docs.map((d) => (
+                      <SortableDocRow
+                        key={d.id}
+                        doc={d}
+                        selected={selectedId === d.id}
+                        exportChecked={exportCheckedIds.has(d.id)}
+                        onSelect={() => selectDocument(d.id)}
+                        onDelete={() => deleteDocument(d.id)}
+                        onExportCheckChange={(checked) =>
+                          setExportChecked(d.id, checked)
+                        }
+                        deleting={deletingDocId === d.id}
+                        disableDrag={reorderingDocuments}
+                        hiddenDuringImport={hiddenImportDocIds.has(d.id)}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            : null}
+          </div>
+        </div>
+        {importJobEntriesSorted.length > 0 ?
+          <div
+            className="app-sider-import-footer"
+            aria-label="Imports in progress"
+          >
+            {importJobEntriesSorted.map(([idStr, row]) => {
+              const jobId = Number(idStr);
+              const pct =
+                (
+                  row.progress_percent != null &&
+                  Number.isFinite(row.progress_percent)
+                ) ?
+                  Math.round(row.progress_percent)
+                : undefined;
+              const cur = row.progress_current;
+              const tot = row.progress_total;
+              const hasRatio = cur != null && tot != null && tot > 0;
+              const remaining =
+                hasRatio && cur != null && tot != null ?
+                  Math.max(0, tot - cur)
+                : null;
+              return (
+                <div
+                  key={jobId}
+                  className="doc-list-import-row"
+                  role="status"
+                  aria-live="polite"
+                  aria-busy={
+                    row.status !== "completed" && row.status !== "failed"
+                  }
+                >
+                  <div className="doc-list-import-body">
+                    <Text
+                      ellipsis
+                      className="doc-list-import-filename"
+                      title={row.filename}
+                    >
+                      {row.filename}
+                    </Text>
+                    {pct != null ?
+                      <Progress percent={pct} size="small" />
+                    : <Progress
+                        percent={0}
+                        status="active"
+                        size="small"
+                        showInfo={false}
+                      />
+                    }
+                    <div className="doc-list-import-meta">
+                      <Text type="secondary" className="doc-list-import-label">
+                        {row.progress_label ?? "Working…"}
+                      </Text>
+                      {hasRatio && cur != null && tot != null ?
+                        <Text
+                          type="secondary"
+                          className="doc-list-import-count"
+                        >
+                          {cur} / {tot}
+                          {remaining != null && remaining > 0 ?
+                            ` (${remaining} left)`
+                          : null}
+                        </Text>
+                      : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        : null}
+        <div className="app-sider-theme-footer">
+          <Tooltip
+            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            <Button
+              type="text"
+              size="small"
+              block
+              className="app-sider-theme-toggle"
+              icon={isDark ? <SunOutlined /> : <MoonOutlined />}
+              onClick={toggleTheme}
+              aria-label={
+                isDark ? "Switch to light theme" : "Switch to dark theme"
+              }
+            />
+          </Tooltip>
+        </div>
       </div>
     );
   }
@@ -1343,19 +1330,22 @@ export default function App() {
                               className="main-doc-title-skeleton"
                               aria-label="Saving title"
                             />
-                        : <Input
-                            variant="borderless"
-                            autoFocus
-                            maxLength={500}
-                            value={docTitleDraft}
-                            onChange={(e) => setDocTitleDraft(e.target.value)}
-                            onBlur={() => void saveDocumentTitle(docTitleDraft)}
-                            onPressEnter={(e) =>
-                              (e.target as HTMLInputElement).blur()
-                            }
-                            aria-label="Document title"
-                            className="main-doc-title-input"
-                          />
+                          : <Input
+                              variant="borderless"
+                              autoFocus
+                              maxLength={500}
+                              value={docTitleDraft}
+                              onChange={(e) => setDocTitleDraft(e.target.value)}
+                              onBlur={() =>
+                                void saveDocumentTitle(docTitleDraft)
+                              }
+                              onPressEnter={(e) =>
+                                (e.target as HTMLInputElement).blur()
+                              }
+                              aria-label="Document title"
+                              className="main-doc-title-input"
+                            />
+
                         : <Title
                             level={4}
                             className="main-doc-title"
@@ -1453,7 +1443,9 @@ export default function App() {
                                 onAddNote={() =>
                                   void addHighlightNote(s.slide_id)
                                 }
-                                focusNewNoteHighlightId={focusNewNoteHighlightId}
+                                focusNewNoteHighlightId={
+                                  focusNewNoteHighlightId
+                                }
                                 onNewNoteFocusHandled={clearNewNoteFocus}
                                 onImageClick={() =>
                                   setLightbox(
@@ -1624,9 +1616,9 @@ function SlideCard({
         <Col xs={24} md={10} lg={9}>
           <div
             className={
-              matchNotesHeightToImage ?
-                "slide-notes-col"
-              : "slide-notes-col slide-notes-col--stacked"
+              matchNotesHeightToImage ? "slide-notes-col" : (
+                "slide-notes-col slide-notes-col--stacked"
+              )
             }
             style={
               matchNotesHeightToImage && notesMaxHeight != null ?
@@ -1637,9 +1629,9 @@ function SlideCard({
             <div className="slide-notes-panel">
               <div
                 className={
-                  matchNotesHeightToImage ?
-                    "slide-notes-scroll"
-                  : "slide-notes-scroll slide-notes-scroll--stacked"
+                  matchNotesHeightToImage ? "slide-notes-scroll" : (
+                    "slide-notes-scroll slide-notes-scroll--stacked"
+                  )
                 }
               >
                 {slide.highlights.length === 0 ?
