@@ -26,13 +26,13 @@ from fastapi.responses import (
     RedirectResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from starlette.requests import Request
 from pdf_processor import (
     count_pages,
     extract_highlights,
     render_pdf_pages_to_png,
 )
 from pydantic import BaseModel, Field
+from starlette.requests import Request
 
 # Monorepo root: apps/api/*.py -> parent.parent.parent
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent

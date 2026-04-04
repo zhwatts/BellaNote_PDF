@@ -123,25 +123,23 @@ def insert_document_record(
 
 
 def update_document_original_path(doc_id: int, path: str) -> None:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE documents SET original_path = %s WHERE id = %s",
-                (path, doc_id),
-            )
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE documents SET original_path = %s WHERE id = %s",
+            (path, doc_id),
+        )
 
 
 def get_document_original_path(doc_id: int) -> str | None:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT original_path FROM documents WHERE id = %s",
-                (doc_id,),
-            )
-            row = cur.fetchone()
-            if not row or not row["original_path"]:
-                return None
-            return str(row["original_path"])
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT original_path FROM documents WHERE id = %s",
+            (doc_id,),
+        )
+        row = cur.fetchone()
+        if not row or not row["original_path"]:
+            return None
+        return str(row["original_path"])
 
 
 def resolve_original_pdf_path(doc_id: int) -> Path | None:
@@ -157,42 +155,40 @@ def resolve_original_pdf_path(doc_id: int) -> Path | None:
 
 
 def clear_highlights_for_document(doc_id: int) -> None:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM highlights WHERE document_id = %s", (doc_id,))
-            cur.execute(
-                "UPDATE slides SET has_highlights = FALSE WHERE document_id = %s",
-                (doc_id,),
-            )
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM highlights WHERE document_id = %s", (doc_id,))
+        cur.execute(
+            "UPDATE slides SET has_highlights = FALSE WHERE document_id = %s",
+            (doc_id,),
+        )
 
 
 def insert_highlights_for_document(doc_id: int, highlights_by_page: dict[int, list[str]]) -> None:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT id, page_number FROM slides
                 WHERE document_id = %s
                 ORDER BY page_number
                 """,
-                (doc_id,),
-            )
-            for row in cur.fetchall():
-                slide_id = int(row["id"])
-                page_num = int(row["page_number"])
-                texts = highlights_by_page.get(page_num, [])
-                for text in texts:
-                    cur.execute(
-                        """
+            (doc_id,),
+        )
+        for row in cur.fetchall():
+            slide_id = int(row["id"])
+            page_num = int(row["page_number"])
+            texts = highlights_by_page.get(page_num, [])
+            for text in texts:
+                cur.execute(
+                    """
                         INSERT INTO highlights (slide_id, document_id, extracted_text)
                         VALUES (%s, %s, %s)
                         """,
-                        (slide_id, doc_id, text),
-                    )
-                cur.execute(
-                    "UPDATE slides SET has_highlights = %s WHERE id = %s",
-                    (bool(texts), slide_id),
+                    (slide_id, doc_id, text),
                 )
+            cur.execute(
+                "UPDATE slides SET has_highlights = %s WHERE id = %s",
+                (bool(texts), slide_id),
+            )
 
 
 def insert_slides_and_highlights(
@@ -203,86 +199,80 @@ def insert_slides_and_highlights(
 ) -> None:
     if len(slide_paths) != total_pages:
         raise ValueError("slide_paths length must match total_pages")
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            for page_num in range(1, total_pages + 1):
-                texts = highlights_by_page.get(page_num, [])
-                has_h = bool(texts)
-                image_path = slide_paths[page_num - 1]
-                cur.execute(
-                    """
+    with get_connection() as conn, conn.cursor() as cur:
+        for page_num in range(1, total_pages + 1):
+            texts = highlights_by_page.get(page_num, [])
+            has_h = bool(texts)
+            image_path = slide_paths[page_num - 1]
+            cur.execute(
+                """
                     INSERT INTO slides (document_id, page_number, image_path, has_highlights)
                     VALUES (%s, %s, %s, %s)
                     RETURNING id
                     """,
-                    (doc_id, page_num, image_path, has_h),
-                )
-                row = cur.fetchone()
-                assert row is not None
-                slide_id = int(row["id"])
-                for text in texts:
-                    cur.execute(
-                        """
+                (doc_id, page_num, image_path, has_h),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            slide_id = int(row["id"])
+            for text in texts:
+                cur.execute(
+                    """
                         INSERT INTO highlights (slide_id, document_id, extracted_text)
                         VALUES (%s, %s, %s)
                         """,
-                        (slide_id, doc_id, text),
-                    )
+                    (slide_id, doc_id, text),
+                )
 
 
 def get_slide_image_paths_for_document(doc_id: int) -> list[str]:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT image_path FROM slides
                 WHERE document_id = %s
                 ORDER BY page_number
                 """,
-                (doc_id,),
-            )
-            return [str(r["image_path"]) for r in cur.fetchall()]
+            (doc_id,),
+        )
+        return [str(r["image_path"]) for r in cur.fetchall()]
 
 
 def document_exists(doc_id: int) -> bool:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 AS x FROM documents WHERE id = %s", (doc_id,))
-            return cur.fetchone() is not None
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 AS x FROM documents WHERE id = %s", (doc_id,))
+        return cur.fetchone() is not None
 
 
 def reorder_documents(ordered_ids: list[int]) -> bool:
     if not ordered_ids:
         return False
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM documents")
-            existing = {int(r["id"]) for r in cur.fetchall()}
-            if set(ordered_ids) != existing or len(ordered_ids) != len(existing):
-                return False
-            for i, doc_id in enumerate(ordered_ids):
-                cur.execute(
-                    "UPDATE documents SET sort_order = %s WHERE id = %s",
-                    (i, doc_id),
-                )
-            return True
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id FROM documents")
+        existing = {int(r["id"]) for r in cur.fetchall()}
+        if set(ordered_ids) != existing or len(ordered_ids) != len(existing):
+            return False
+        for i, doc_id in enumerate(ordered_ids):
+            cur.execute(
+                "UPDATE documents SET sort_order = %s WHERE id = %s",
+                (i, doc_id),
+            )
+        return True
 
 
 def set_document_filename(doc_id: int, filename: str) -> bool:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE documents SET filename = %s WHERE id = %s",
-                (filename, doc_id),
-            )
-            return cur.rowcount > 0
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE documents SET filename = %s WHERE id = %s",
+            (filename, doc_id),
+        )
+        return cur.rowcount > 0
 
 
 def list_documents() -> list[dict[str, Any]]:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT d.id, d.filename, d.uploaded_at, d.total_pages,
                        d.original_path,
                        COUNT(h.id) AS highlight_count
@@ -292,190 +282,181 @@ def list_documents() -> list[dict[str, Any]]:
                          d.original_path, d.sort_order
                 ORDER BY d.sort_order ASC, d.id ASC
                 """
-            )
-            rows = cur.fetchall()
-            return [
-                {
-                    "id": r["id"],
-                    "filename": r["filename"],
-                    "uploaded_at": _serializable_uploaded_at(r["uploaded_at"]),
-                    "total_pages": r["total_pages"],
-                    "highlight_count": int(r["highlight_count"]),
-                    "original_stored": r["original_path"] is not None,
-                }
-                for r in rows
-            ]
+        )
+        rows = cur.fetchall()
+        return [
+            {
+                "id": r["id"],
+                "filename": r["filename"],
+                "uploaded_at": _serializable_uploaded_at(r["uploaded_at"]),
+                "total_pages": r["total_pages"],
+                "highlight_count": int(r["highlight_count"]),
+                "original_stored": r["original_path"] is not None,
+            }
+            for r in rows
+        ]
 
 
 def get_slides_with_highlights(doc_id: int) -> list[dict[str, Any]]:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT id, page_number, image_path, has_highlights, is_hidden
                 FROM slides
                 WHERE document_id = %s
                 ORDER BY page_number
                 """,
-                (doc_id,),
-            )
-            slides = cur.fetchall()
-            out: list[dict[str, Any]] = []
-            for s in slides:
-                cur.execute(
-                    """
+            (doc_id,),
+        )
+        slides = cur.fetchall()
+        out: list[dict[str, Any]] = []
+        for s in slides:
+            cur.execute(
+                """
                     SELECT id, extracted_text, is_very_important
                     FROM highlights
                     WHERE slide_id = %s
                     ORDER BY id
                     """,
-                    (s["id"],),
-                )
-                hl_rows = cur.fetchall()
-                highlights = [
-                    {
-                        "id": h["id"],
-                        "text": h["extracted_text"],
-                        "is_very_important": bool(h["is_very_important"]),
-                    }
-                    for h in hl_rows
-                ]
-                out.append(
-                    {
-                        "slide_id": s["id"],
-                        "page_number": s["page_number"],
-                        "image_url": f"/slides/{doc_id}/{s['page_number']}",
-                        "has_highlights": bool(s["has_highlights"]),
-                        "is_hidden": bool(s["is_hidden"]),
-                        "highlights": highlights,
-                    }
-                )
-            return out
+                (s["id"],),
+            )
+            hl_rows = cur.fetchall()
+            highlights = [
+                {
+                    "id": h["id"],
+                    "text": h["extracted_text"],
+                    "is_very_important": bool(h["is_very_important"]),
+                }
+                for h in hl_rows
+            ]
+            out.append(
+                {
+                    "slide_id": s["id"],
+                    "page_number": s["page_number"],
+                    "image_url": f"/slides/{doc_id}/{s['page_number']}",
+                    "has_highlights": bool(s["has_highlights"]),
+                    "is_hidden": bool(s["is_hidden"]),
+                    "highlights": highlights,
+                }
+            )
+        return out
 
 
 def get_slide_image_path(doc_id: int, page_number: int) -> str | None:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT image_path FROM slides
                 WHERE document_id = %s AND page_number = %s
                 """,
-                (doc_id, page_number),
-            )
-            row = cur.fetchone()
-            return str(row["image_path"]) if row else None
+            (doc_id, page_number),
+        )
+        row = cur.fetchone()
+        return str(row["image_path"]) if row else None
 
 
 def set_slide_hidden(slide_id: int, hidden: bool) -> bool:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE slides SET is_hidden = %s WHERE id = %s",
-                (hidden, slide_id),
-            )
-            return cur.rowcount > 0
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE slides SET is_hidden = %s WHERE id = %s",
+            (hidden, slide_id),
+        )
+        return cur.rowcount > 0
 
 
 def insert_highlight(slide_id: int, text: str) -> int | None:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, document_id FROM slides WHERE id = %s",
-                (slide_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                return None
-            doc_id = int(row["document_id"])
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, document_id FROM slides WHERE id = %s",
+            (slide_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        doc_id = int(row["document_id"])
+        cur.execute(
+            """
                 INSERT INTO highlights (slide_id, document_id, extracted_text)
                 VALUES (%s, %s, %s)
                 RETURNING id
                 """,
-                (slide_id, doc_id, text),
-            )
-            hid_row = cur.fetchone()
-            assert hid_row is not None
-            hid = int(hid_row["id"])
-            cur.execute(
-                "UPDATE slides SET has_highlights = TRUE WHERE id = %s",
-                (slide_id,),
-            )
-            return hid
+            (slide_id, doc_id, text),
+        )
+        hid_row = cur.fetchone()
+        assert hid_row is not None
+        hid = int(hid_row["id"])
+        cur.execute(
+            "UPDATE slides SET has_highlights = TRUE WHERE id = %s",
+            (slide_id,),
+        )
+        return hid
 
 
 def set_highlight_very_important(highlight_id: int, very_important: bool) -> bool:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE highlights SET is_very_important = %s WHERE id = %s",
-                (very_important, highlight_id),
-            )
-            return cur.rowcount > 0
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE highlights SET is_very_important = %s WHERE id = %s",
+            (very_important, highlight_id),
+        )
+        return cur.rowcount > 0
 
 
 def set_highlight_text(highlight_id: int, text: str) -> bool:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE highlights SET extracted_text = %s WHERE id = %s",
-                (text, highlight_id),
-            )
-            return cur.rowcount > 0
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE highlights SET extracted_text = %s WHERE id = %s",
+            (text, highlight_id),
+        )
+        return cur.rowcount > 0
 
 
 def delete_highlight(highlight_id: int) -> bool:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT slide_id FROM highlights WHERE id = %s",
-                (highlight_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                return False
-            slide_id = row["slide_id"]
-            cur.execute("DELETE FROM highlights WHERE id = %s", (highlight_id,))
-            cur.execute(
-                "SELECT COUNT(*) AS c FROM highlights WHERE slide_id = %s",
-                (slide_id,),
-            )
-            count = int(cur.fetchone()["c"])
-            cur.execute(
-                "UPDATE slides SET has_highlights = %s WHERE id = %s",
-                (count > 0, slide_id),
-            )
-            return True
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT slide_id FROM highlights WHERE id = %s",
+            (highlight_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+        slide_id = row["slide_id"]
+        cur.execute("DELETE FROM highlights WHERE id = %s", (highlight_id,))
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM highlights WHERE slide_id = %s",
+            (slide_id,),
+        )
+        count = int(cur.fetchone()["c"])
+        cur.execute(
+            "UPDATE slides SET has_highlights = %s WHERE id = %s",
+            (count > 0, slide_id),
+        )
+        return True
 
 
 def delete_document(doc_id: int) -> tuple[bool, str | None]:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT slide_image_dir FROM documents WHERE id = %s",
-                (doc_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                return False, None
-            slide_dir = row["slide_image_dir"]
-            cur.execute("DELETE FROM documents WHERE id = %s", (doc_id,))
-            return True, slide_dir
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT slide_image_dir FROM documents WHERE id = %s",
+            (doc_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False, None
+        slide_dir = row["slide_image_dir"]
+        cur.execute("DELETE FROM documents WHERE id = %s", (doc_id,))
+        return True, slide_dir
 
 
 def export_highlights_plain(
     document_ids: list[int] | None = None,
 ) -> Iterator[tuple[str, int, str, bool]]:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            if document_ids is not None:
-                if not document_ids:
-                    return
-                placeholders = ",".join(["%s"] * len(document_ids))
-                cur.execute(
-                    f"""
+    with get_connection() as conn, conn.cursor() as cur:
+        if document_ids is not None:
+            if not document_ids:
+                return
+            placeholders = ",".join(["%s"] * len(document_ids))
+            cur.execute(
+                f"""
                     SELECT d.filename, s.page_number, h.extracted_text, h.is_very_important
                     FROM highlights h
                     JOIN documents d ON d.id = h.document_id
@@ -483,61 +464,58 @@ def export_highlights_plain(
                     WHERE d.id IN ({placeholders})
                     ORDER BY d.sort_order ASC, d.id ASC, s.page_number, h.id
                     """,
-                    document_ids,
-                )
-            else:
-                cur.execute(
-                    """
+                document_ids,
+            )
+        else:
+            cur.execute(
+                """
                     SELECT d.filename, s.page_number, h.extracted_text, h.is_very_important
                     FROM highlights h
                     JOIN documents d ON d.id = h.document_id
                     JOIN slides s ON s.id = h.slide_id
                     ORDER BY d.sort_order ASC, d.id ASC, s.page_number, h.id
                     """
-                )
-            for r in cur.fetchall():
-                yield (
-                    r["filename"],
-                    int(r["page_number"]),
-                    r["extracted_text"],
-                    bool(r["is_very_important"]),
-                )
+            )
+        for r in cur.fetchall():
+            yield (
+                r["filename"],
+                int(r["page_number"]),
+                r["extracted_text"],
+                bool(r["is_very_important"]),
+            )
 
 
 def create_import_job(filename: str, temp_pdf_path: str) -> int:
     ensure_data_dirs()
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 INSERT INTO import_jobs (filename, temp_pdf_path, status)
                 VALUES (%s, %s, 'pending')
                 RETURNING id
                 """,
-                (filename, temp_pdf_path),
-            )
-            row = cur.fetchone()
-            assert row is not None
-            return int(row["id"])
+            (filename, temp_pdf_path),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        return int(row["id"])
 
 
 def update_import_job_status(job_id: int, status: str) -> None:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE import_jobs SET status = %s WHERE id = %s",
-                (status, job_id),
-            )
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE import_jobs SET status = %s WHERE id = %s",
+            (status, job_id),
+        )
 
 
 def update_import_job_document_id(job_id: int, document_id: int) -> None:
     """Link job to documents row as soon as it exists (client hides sidebar dup)."""
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE import_jobs SET document_id = %s WHERE id = %s",
-                (document_id, job_id),
-            )
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE import_jobs SET document_id = %s WHERE id = %s",
+            (document_id, job_id),
+        )
 
 
 def update_import_job_progress(
@@ -546,16 +524,15 @@ def update_import_job_progress(
     progress_total: int | None,
     progress_label: str | None,
 ) -> None:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 UPDATE import_jobs
                 SET progress_current = %s, progress_total = %s, progress_label = %s
                 WHERE id = %s
                 """,
-                (progress_current, progress_total, progress_label, job_id),
-            )
+            (progress_current, progress_total, progress_label, job_id),
+        )
 
 
 def complete_import_job(
@@ -565,32 +542,30 @@ def complete_import_job(
     warnings: list[dict[str, Any]],
 ) -> None:
     payload = {"result": result, "warnings": warnings}
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 UPDATE import_jobs
                 SET status = 'completed', document_id = %s, error_message = NULL,
                     result_json = %s::jsonb,
                     progress_current = NULL, progress_total = NULL, progress_label = NULL
                 WHERE id = %s
                 """,
-                (document_id, json.dumps(payload), job_id),
-            )
+            (document_id, json.dumps(payload), job_id),
+        )
 
 
 def fail_import_job(job_id: int, error_message: str) -> None:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 UPDATE import_jobs
                 SET status = 'failed', error_message = %s,
                     progress_current = NULL, progress_total = NULL, progress_label = NULL
                 WHERE id = %s
                 """,
-                (error_message[:8000], job_id),
-            )
+            (error_message[:8000], job_id),
+        )
 
 
 def _import_job_row_to_public(row: Any) -> dict[str, Any]:
@@ -630,46 +605,43 @@ def _import_job_row_to_public(row: Any) -> dict[str, Any]:
 
 
 def get_import_job_public(job_id: int) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT id, filename, status, document_id, error_message, result_json,
                        progress_current, progress_total, progress_label
                 FROM import_jobs WHERE id = %s
                 """,
-                (job_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                return None
-            return _import_job_row_to_public(row)
+            (job_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return _import_job_row_to_public(row)
 
 
 def list_active_import_jobs() -> list[dict[str, Any]]:
     """Jobs still queued or running (for UI recovery after refresh)."""
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT id, filename, status, document_id, error_message, result_json,
                        progress_current, progress_total, progress_label
                 FROM import_jobs
                 WHERE status IN ('pending', 'processing')
                 ORDER BY created_at ASC
                 """
-            )
-            return [_import_job_row_to_public(row) for row in cur.fetchall()]
+        )
+        return [_import_job_row_to_public(row) for row in cur.fetchall()]
 
 
 def get_import_job_temp_path(job_id: int) -> tuple[str, str] | None:
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT temp_pdf_path, filename, status FROM import_jobs WHERE id = %s",
-                (job_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                return None
-            return (str(row["temp_pdf_path"]), str(row["filename"]))
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT temp_pdf_path, filename, status FROM import_jobs WHERE id = %s",
+            (job_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return (str(row["temp_pdf_path"]), str(row["filename"]))
