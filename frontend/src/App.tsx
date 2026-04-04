@@ -46,6 +46,7 @@ import {
   Typography,
 } from "antd";
 import {
+  ArrowUpOutlined,
   DeleteOutlined,
   ExportOutlined,
   PlusOutlined,
@@ -334,6 +335,8 @@ export default function App() {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const mainSlidesRef = useRef<HTMLDivElement>(null);
+  const firstSlideRef = useRef<HTMLDivElement | null>(null);
+  const [showScrollTopFab, setShowScrollTopFab] = useState(false);
   /** Prevents duplicate poll loops (e.g. React Strict Mode or recover + upload). */
   const pollingImportJobIdsRef = useRef<Set<number>>(new Set());
 
@@ -521,6 +524,31 @@ export default function App() {
     }
     return list;
   }, [slides, hideNoHl, starredOnly, slideSearch]);
+
+  const firstVisibleSlideId = visible[0]?.slide_id;
+
+  useEffect(() => {
+    const root = mainSlidesRef.current;
+    const target = firstSlideRef.current;
+    if (!root || !target || visible.length === 0) {
+      setShowScrollTopFab(false);
+      return;
+    }
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        setShowScrollTopFab(!entry.isIntersecting);
+      },
+      { root, threshold: 0 },
+    );
+    obs.observe(target);
+    return () => {
+      obs.disconnect();
+    };
+  }, [visible.length, firstVisibleSlideId, loadingSlides, selectedId]);
+
+  const scrollSlidesToTop = useCallback(() => {
+    mainSlidesRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
 
   /** Oldest job at top of footer, newest at bottom (job_id order). */
   const importJobEntriesSorted = useMemo(
@@ -1214,36 +1242,60 @@ export default function App() {
                       />
                     </Flex>
                   </div>
-                  <div ref={mainSlidesRef} className="main-slides">
-                    <Spin spinning={loadingSlides}>
-                      {visible.length === 0 ?
-                        <Empty description="No slides match filters" />
-                      : visible.map((s) => (
-                          <SlideCard
-                            key={s.slide_id}
-                            slide={s}
-                            hideBusy={pendingHideSlideIds.has(s.slide_id)}
-                            addNoteBusy={pendingAddNoteSlideIds.has(s.slide_id)}
-                            pendingStarIds={pendingStarIds}
-                            pendingDeleteIds={pendingDeleteIds}
-                            onHide={() =>
-                              void patchHide(s.slide_id, !s.is_hidden)
-                            }
-                            onToggleStarred={patchStarred}
-                            onDelete={removeHighlight}
-                            onSaveText={saveHighlightText}
-                            onAddNote={() => void addHighlightNote(s.slide_id)}
-                            focusNewNoteHighlightId={focusNewNoteHighlightId}
-                            onNewNoteFocusHandled={clearNewNoteFocus}
-                            onImageClick={() =>
-                              setLightbox(
-                                `${window.location.origin}${s.image_url}`,
-                              )
-                            }
-                          />
-                        ))
-                      }
-                    </Spin>
+                  <div className="main-slides-wrap">
+                    <div ref={mainSlidesRef} className="main-slides">
+                      <Spin spinning={loadingSlides}>
+                        {visible.length === 0 ?
+                          <Empty description="No slides match filters" />
+                        : visible.map((s, i) => (
+                            <div
+                              key={s.slide_id}
+                              ref={i === 0 ? firstSlideRef : undefined}
+                              className="slide-card-outer"
+                            >
+                              <SlideCard
+                                slide={s}
+                                hideBusy={pendingHideSlideIds.has(s.slide_id)}
+                                addNoteBusy={pendingAddNoteSlideIds.has(
+                                  s.slide_id,
+                                )}
+                                pendingStarIds={pendingStarIds}
+                                pendingDeleteIds={pendingDeleteIds}
+                                onHide={() =>
+                                  void patchHide(s.slide_id, !s.is_hidden)
+                                }
+                                onToggleStarred={patchStarred}
+                                onDelete={removeHighlight}
+                                onSaveText={saveHighlightText}
+                                onAddNote={() =>
+                                  void addHighlightNote(s.slide_id)
+                                }
+                                focusNewNoteHighlightId={focusNewNoteHighlightId}
+                                onNewNoteFocusHandled={clearNewNoteFocus}
+                                onImageClick={() =>
+                                  setLightbox(
+                                    `${window.location.origin}${s.image_url}`,
+                                  )
+                                }
+                              />
+                            </div>
+                          ))
+                        }
+                      </Spin>
+                    </div>
+                    {showScrollTopFab ?
+                      <Tooltip title="Back to top" placement="left">
+                        <Button
+                          type="primary"
+                          shape="circle"
+                          size="large"
+                          icon={<ArrowUpOutlined />}
+                          className="main-slides-scroll-top-fab"
+                          onClick={scrollSlidesToTop}
+                          aria-label="Scroll slides back to top"
+                        />
+                      </Tooltip>
+                    : null}
                   </div>
                 </>
               }

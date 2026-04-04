@@ -437,11 +437,31 @@
   width: 100%;
 }
 
+.main-slides-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .main-slides {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 16px 24px 32px;
+}
+
+.main-slides-scroll-top-fab {
+  position: absolute;
+  right: 28px;
+  bottom: 24px;
+  z-index: 5;
+  box-shadow: 0 4px 14px rgba(30, 41, 59, 0.2);
+}
+
+.slide-card-outer {
+  display: block;
 }
 
 .app-processing-overlay {
