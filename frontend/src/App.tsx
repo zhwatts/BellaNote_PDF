@@ -24,6 +24,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  Alert,
   Button,
   Card,
   Checkbox,
@@ -35,7 +36,6 @@ import {
   List,
   message,
   Modal,
-  Popconfirm,
   Progress,
   Row,
   Skeleton,
@@ -62,7 +62,7 @@ import { HighlightTextarea } from "./components/HighlightTextarea";
 import "./App.css";
 
 const { Sider, Content } = Layout;
-const { Text, Title } = Typography;
+const { Paragraph, Text, Title } = Typography;
 
 type DocSummary = {
   id: number;
@@ -189,13 +189,16 @@ function SortableDocRow({
   selected: boolean;
   exportChecked: boolean;
   onSelect: () => void;
-  onDelete: () => void;
+  onDelete: () => Promise<void>;
   onExportCheckChange: (checked: boolean) => void;
   deleting: boolean;
   disableDrag: boolean;
   /** Hide row while same PDF is shown in the import progress block (keep in DOM for reorder). */
   hiddenDuringImport: boolean;
 }) {
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteConfirmSecond, setDeleteConfirmSecond] = useState(false);
+
   const {
     attributes,
     listeners,
@@ -207,6 +210,21 @@ function SortableDocRow({
     id: doc.id,
     disabled: disableDrag || deleting || hiddenDuringImport,
   });
+
+  const confirmDeleteDocument = async () => {
+    try {
+      await onDelete();
+      setDeleteModalOpen(false);
+      setDeleteConfirmSecond(false);
+    } catch {
+      /* Parent shows error; keep modal open */
+    }
+  };
+
+  const closeDeleteModals = () => {
+    setDeleteModalOpen(false);
+    setDeleteConfirmSecond(false);
+  };
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -258,25 +276,93 @@ function SortableDocRow({
           {doc.total_pages} {doc.total_pages === 1 ? "slide" : "slides"}
         </Text>
       </div>
-      <Popconfirm
-        title="Delete this PDF?"
-        description="Slides and highlights will be removed."
-        okText="Delete"
-        okButtonProps={{ danger: true }}
-        disabled={deleting}
-        onConfirm={onDelete}
-        onCancel={(e) => e?.stopPropagation()}
+      <Modal
+        open={deleteModalOpen && !deleteConfirmSecond}
+        title={null}
+        closable
+        maskClosable
+        onCancel={closeDeleteModals}
+        footer={[
+          <Button key="no" onClick={closeDeleteModals}>
+            No
+          </Button>,
+          <Button
+            key="yes"
+            type="primary"
+            danger
+            onClick={() => setDeleteConfirmSecond(true)}
+          >
+            Yes
+          </Button>,
+        ]}
+        destroyOnClose
+        width={440}
+        className="doc-delete-confirm-modal"
       >
-        <Button
-          type="text"
-          danger
-          size="small"
-          loading={deleting}
-          icon={deleting ? undefined : <DeleteOutlined />}
-          aria-label="Delete document"
-          onClick={(e) => e.stopPropagation()}
+        <Alert
+          type="warning"
+          showIcon
+          message="Heads up!"
+          className="doc-delete-confirm-alert"
         />
-      </Popconfirm>
+        <Paragraph className="doc-delete-confirm-body">
+          You&apos;re about to delete the document, and all associated notes from
+          the system. Are you sure you want to continue?
+        </Paragraph>
+      </Modal>
+      <Modal
+        open={deleteConfirmSecond}
+        title={null}
+        closable={!deleting}
+        maskClosable={!deleting}
+        onCancel={() => !deleting && closeDeleteModals()}
+        footer={[
+          <Button
+            key="no"
+            disabled={deleting}
+            onClick={closeDeleteModals}
+          >
+            No
+          </Button>,
+          <Button
+            key="yes"
+            type="primary"
+            danger
+            loading={deleting}
+            onClick={() => void confirmDeleteDocument()}
+          >
+            Yes
+          </Button>,
+        ]}
+        destroyOnClose
+        width={440}
+        className="doc-delete-confirm-modal doc-delete-confirm-modal--second"
+      >
+        <Alert
+          type="warning"
+          showIcon
+          message="Heads up!"
+          className="doc-delete-confirm-alert"
+        />
+        <Paragraph className="doc-delete-confirm-body">
+          Please confirm again: <Text strong>{doc.filename}</Text> will be
+          removed permanently, along with all associated notes. This cannot be
+          undone.
+        </Paragraph>
+      </Modal>
+      <Button
+        type="text"
+        danger
+        size="small"
+        loading={deleting}
+        icon={deleting ? undefined : <DeleteOutlined />}
+        aria-label="Delete document"
+        onClick={(e) => {
+          e.stopPropagation();
+          setDeleteConfirmSecond(false);
+          setDeleteModalOpen(true);
+        }}
+      />
       <div
         className="doc-export-checkbox-wrap"
         onClick={(e) => e.stopPropagation()}
@@ -831,6 +917,7 @@ export default function App() {
       message.success("Document removed");
     } catch (e) {
       message.error(String(e));
+      throw e;
     } finally {
       setDeletingDocId(null);
     }
@@ -1051,7 +1138,7 @@ export default function App() {
                             selected={selectedId === d.id}
                             exportChecked={exportCheckedIds.has(d.id)}
                             onSelect={() => setSelectedId(d.id)}
-                            onDelete={() => void deleteDocument(d.id)}
+                            onDelete={() => deleteDocument(d.id)}
                             onExportCheckChange={(checked) =>
                               setExportChecked(d.id, checked)
                             }

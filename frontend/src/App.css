@@ -552,3 +552,15 @@
 .slide-notes-scroll .slide-notes-list .ant-list-item:last-child {
   padding-bottom: 0;
 }
+
+.doc-delete-confirm-modal .ant-modal-body {
+  padding-top: 20px;
+}
+
+.doc-delete-confirm-alert {
+  margin-bottom: 16px;
+}
+
+.doc-delete-confirm-body {
+  margin-bottom: 0 !important;
+}
