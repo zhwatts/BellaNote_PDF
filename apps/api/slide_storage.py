@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
+
+import httpx
+
+_log = logging.getLogger("bella_note.storage")
 
 STORAGE_PREFIX = "storage:"
 
@@ -59,6 +65,46 @@ def public_url_from_db_path(image_path: str) -> str:
     return _client().storage.from_(_bucket()).get_public_url(key)
 
 
+def _upload_one_with_retry(
+    sb,
+    key: str,
+    data: bytes,
+    *,
+    max_attempts: int = 5,
+) -> None:
+    """Retry transient httpx/http2 errors (e.g. EAGAIN under parallel load)."""
+    delay = 0.25
+    for attempt in range(1, max_attempts + 1):
+        try:
+            sb.upload(
+                key,
+                data,
+                file_options={
+                    "content-type": "image/png",
+                    "upsert": "true",
+                },
+            )
+            return
+        except (
+            httpx.ReadError,
+            httpx.WriteError,
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            httpx.RemoteProtocolError,
+        ) as e:
+            if attempt >= max_attempts:
+                raise
+            _log.warning(
+                "storage upload retry key=%s attempt=%s/%s: %s",
+                key,
+                attempt,
+                max_attempts,
+                e,
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, 2.0)
+
+
 def upload_pages_from_dir(
     doc_id: int,
     slide_dir: Path,
@@ -71,14 +117,7 @@ def upload_pages_from_dir(
         local = slide_dir / f"page_{page}.png"
         data = local.read_bytes()
         key = object_key(doc_id, page)
-        sb.upload(
-            key,
-            data,
-            file_options={
-                "content-type": "image/png",
-                "upsert": "true",
-            },
-        )
+        _upload_one_with_retry(sb, key, data)
         if on_page_done is not None:
             on_page_done(page, total_pages)
 

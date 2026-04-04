@@ -18,7 +18,7 @@ from typing import Annotated
 
 import database as db
 import slide_storage
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
@@ -59,6 +59,18 @@ _configure_logging()
 app = FastAPI(title="Bella Note")
 
 log = logging.getLogger("bella_note.upload")
+
+# One ingest at a time: accepts many POST /upload jobs, processes FIFO (avoids HTTP/2 load errors).
+import_job_queue: asyncio.Queue[int] = asyncio.Queue()
+
+
+async def _import_worker() -> None:
+    while True:
+        job_id = await import_job_queue.get()
+        try:
+            await _run_import_job(job_id)
+        finally:
+            import_job_queue.task_done()
 
 
 @app.middleware("http")
@@ -264,9 +276,12 @@ def _html_to_plain(html: str) -> str:
 
 
 @app.on_event("startup")
-def _startup() -> None:
+async def _startup() -> None:
     _configure_logging()
     db.init_db()
+    asyncio.create_task(_import_worker())
+    for row in db.list_active_import_jobs():
+        await import_job_queue.put(int(row["job_id"]))
 
 
 def _group_highlights_by_page(items: list[dict]) -> dict[int, list[str]]:
@@ -331,7 +346,6 @@ def _purge_document_files(doc_id: int) -> None:
 @app.post("/upload", response_model=None)
 @app.post("/upload/", response_model=None)
 async def upload(
-    background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
 ) -> JSONResponse | dict:
     log.info("upload handler entered file_count=%s", len(files))
@@ -369,7 +383,7 @@ async def upload(
 
             job_id = db.create_import_job(file.filename, tmp_path)
             jobs.append({"job_id": job_id, "filename": file.filename})
-            background_tasks.add_task(_run_import_job, job_id)
+            await import_job_queue.put(job_id)
             log.info(
                 "upload queued import job_id=%s filename=%s",
                 job_id,
