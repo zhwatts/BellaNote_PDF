@@ -36,7 +36,9 @@ import {
   message,
   Modal,
   Popconfirm,
+  Progress,
   Row,
+  Skeleton,
   Space,
   Spin,
   Switch,
@@ -98,6 +100,38 @@ type UploadResponse = {
   warnings: { document_id?: number; filename: string; message: string }[];
 };
 
+type ImportJobRef = { job_id: number; filename: string };
+
+type UploadQueuedResponse = {
+  jobs: ImportJobRef[];
+  warnings: UploadResponse["warnings"];
+};
+
+type ImportJobPoll = {
+  job_id: number;
+  filename: string;
+  status: string;
+  document_id: number | null;
+  error_message: string | null;
+  result: UploadResult | null;
+  warnings: UploadResponse["warnings"];
+  progress_current?: number | null;
+  progress_total?: number | null;
+  progress_label?: string | null;
+  progress_percent?: number | null;
+};
+
+type ActiveImportJobRow = {
+  filename: string;
+  status: string;
+  /** Set once ingest creates the documents row; sidebar hides duplicate until job completes. */
+  document_id?: number | null;
+  progress_current?: number | null;
+  progress_total?: number | null;
+  progress_label?: string | null;
+  progress_percent?: number | null;
+};
+
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
@@ -105,6 +139,21 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error(err || res.statusText);
   }
   return res.json() as Promise<T>;
+}
+
+async function pollImportJob(
+  jobId: number,
+  intervalMs = 900,
+  onUpdate?: (j: ImportJobPoll) => void,
+): Promise<ImportJobPoll> {
+  for (;;) {
+    const j = await apiJson<ImportJobPoll>(`/import/jobs/${jobId}`);
+    onUpdate?.(j);
+    if (j.status === "completed" || j.status === "failed") {
+      return j;
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
 }
 
 function filterSlides(
@@ -129,6 +178,9 @@ function SortableDocRow({
   onSelect,
   onDelete,
   onExportCheckChange,
+  deleting,
+  disableDrag,
+  hiddenDuringImport,
 }: {
   doc: DocSummary;
   selected: boolean;
@@ -136,6 +188,10 @@ function SortableDocRow({
   onSelect: () => void;
   onDelete: () => void;
   onExportCheckChange: (checked: boolean) => void;
+  deleting: boolean;
+  disableDrag: boolean;
+  /** Hide row while same PDF is shown in the import progress block (keep in DOM for reorder). */
+  hiddenDuringImport: boolean;
 }) {
   const {
     attributes,
@@ -144,7 +200,10 @@ function SortableDocRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: doc.id });
+  } = useSortable({
+    id: doc.id,
+    disabled: disableDrag || deleting || hiddenDuringImport,
+  });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -160,7 +219,11 @@ function SortableDocRow({
       style={style}
       className={`doc-list-row${selected ? " doc-list-row--selected" : ""}${
         exportChecked ? " doc-list-row--export-checked" : ""
+      }${deleting ? " doc-list-row--busy" : ""}${
+        hiddenDuringImport ? " doc-list-row--hidden-import" : ""
       }`}
+      aria-busy={deleting}
+      aria-hidden={hiddenDuringImport}
     >
       <button
         type="button"
@@ -175,9 +238,10 @@ function SortableDocRow({
       <div
         className="doc-list-row-body"
         role="button"
-        tabIndex={0}
-        onClick={onSelect}
+        tabIndex={deleting ? -1 : 0}
+        onClick={deleting ? undefined : onSelect}
         onKeyDown={(e) => {
+          if (deleting) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             onSelect();
@@ -187,8 +251,8 @@ function SortableDocRow({
         <Text ellipsis className="doc-list-row-title" style={{ maxWidth: 180 }}>
           {doc.filename}
         </Text>
-        <Text type="secondary" className="doc-list-highlight-count">
-          {doc.highlight_count} highlights
+        <Text type="secondary" className="doc-list-slide-count">
+          {doc.total_pages} {doc.total_pages === 1 ? "slide" : "slides"}
         </Text>
       </div>
       <Popconfirm
@@ -196,6 +260,7 @@ function SortableDocRow({
         description="Slides and highlights will be removed."
         okText="Delete"
         okButtonProps={{ danger: true }}
+        disabled={deleting}
         onConfirm={onDelete}
         onCancel={(e) => e?.stopPropagation()}
       >
@@ -203,7 +268,8 @@ function SortableDocRow({
           type="text"
           danger
           size="small"
-          icon={<DeleteOutlined />}
+          loading={deleting}
+          icon={deleting ? undefined : <DeleteOutlined />}
           aria-label="Delete document"
           onClick={(e) => e.stopPropagation()}
         />
@@ -215,6 +281,7 @@ function SortableDocRow({
       >
         <Checkbox
           checked={exportChecked}
+          disabled={deleting}
           aria-label={`Include ${doc.filename} in export`}
           onChange={(e) => onExportCheckChange(e.target.checked)}
         />
@@ -229,7 +296,12 @@ export default function App() {
   const [slides, setSlides] = useState<SlideRow[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [loadingSlides, setLoadingSlides] = useState(false);
+  /** True only while the multipart POST to /upload is in flight (before response). */
   const [uploading, setUploading] = useState(false);
+  /** Per-job UI while background import runs (progress from GET /import/jobs/:id). */
+  const [importJobUi, setImportJobUi] = useState<
+    Record<number, ActiveImportJobRow>
+  >({});
   const [hideNoHl, setHideNoHl] = useState(false);
   const [starredOnly, setStarredOnly] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -242,9 +314,25 @@ export default function App() {
   const [focusNewNoteHighlightId, setFocusNewNoteHighlightId] = useState<
     number | null
   >(null);
+  const [deletingDocId, setDeletingDocId] = useState<number | null>(null);
+  const [reorderingDocuments, setReorderingDocuments] = useState(false);
+  const [savingDocTitle, setSavingDocTitle] = useState(false);
+  const [pendingStarIds, setPendingStarIds] = useState(() => new Set<number>());
+  const [pendingDeleteIds, setPendingDeleteIds] = useState(
+    () => new Set<number>(),
+  );
+  const [pendingHideSlideIds, setPendingHideSlideIds] = useState(
+    () => new Set<number>(),
+  );
+  const [pendingAddNoteSlideIds, setPendingAddNoteSlideIds] = useState(
+    () => new Set<number>(),
+  );
+  const [exporting, setExporting] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const mainSlidesRef = useRef<HTMLDivElement>(null);
+  /** Prevents duplicate poll loops (e.g. React Strict Mode or recover + upload). */
+  const pollingImportJobIdsRef = useRef<Set<number>>(new Set());
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -264,9 +352,113 @@ export default function App() {
     }
   }, []);
 
+  const mergeImportPoll = useCallback((polled: ImportJobPoll) => {
+    setImportJobUi((prev) => ({
+      ...prev,
+      [polled.job_id]: {
+        filename: polled.filename,
+        status: polled.status,
+        document_id: polled.document_id,
+        progress_current: polled.progress_current,
+        progress_total: polled.progress_total,
+        progress_label: polled.progress_label,
+        progress_percent: polled.progress_percent,
+      },
+    }));
+  }, []);
+
+  /** Sidebar doc row hidden while a matching import job is active (doc exists in DB before ingest finishes). */
+  const hiddenImportDocIds = useMemo(() => {
+    const s = new Set<number>();
+    for (const r of Object.values(importJobUi)) {
+      if (r.document_id != null) {
+        s.add(r.document_id);
+      } else {
+        const match = docs.find((d) => d.filename === r.filename);
+        if (match) s.add(match.id);
+      }
+    }
+    return s;
+  }, [importJobUi, docs]);
+
+  useEffect(() => {
+    if (selectedId != null && hiddenImportDocIds.has(selectedId)) {
+      setSelectedId(null);
+      setSlides([]);
+    }
+  }, [selectedId, hiddenImportDocIds]);
+
   useEffect(() => {
     void loadDocuments();
   }, [loadDocuments]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await apiJson<{ jobs: ImportJobPoll[] }>(
+          "/import/jobs/active",
+        );
+        if (cancelled || !data.jobs?.length) return;
+        setImportJobUi((prev) => {
+          const next = { ...prev };
+          for (const j of data.jobs) {
+            next[j.job_id] = {
+              filename: j.filename,
+              status: j.status,
+              document_id: j.document_id,
+              progress_current: j.progress_current,
+              progress_total: j.progress_total,
+              progress_label: j.progress_label,
+              progress_percent: j.progress_percent,
+            };
+          }
+          return next;
+        });
+        for (const j of data.jobs) {
+          if (pollingImportJobIdsRef.current.has(j.job_id)) continue;
+          pollingImportJobIdsRef.current.add(j.job_id);
+          void (async () => {
+            const jobId = j.job_id;
+            try {
+              const final = await pollImportJob(jobId, 900, mergeImportPoll);
+              if (cancelled) return;
+              if (final.status === "failed") {
+                message.error(
+                  `${final.filename}: ${final.error_message ?? "Import failed"}`,
+                  10,
+                );
+              } else {
+                for (const w of final.warnings ?? []) {
+                  message.warning(`${w.filename}: ${w.message}`, 8);
+                }
+                if (final.result?.document_id != null) {
+                  setSelectedId((prev) => prev ?? final.result!.document_id);
+                }
+              }
+              await loadDocuments();
+            } catch (e) {
+              if (!cancelled) message.error(String(e));
+            } finally {
+              pollingImportJobIdsRef.current.delete(jobId);
+              if (!cancelled) {
+                setImportJobUi((prev) => {
+                  const n = { ...prev };
+                  delete n[jobId];
+                  return n;
+                });
+              }
+            }
+          })();
+        }
+      } catch {
+        /* Older API or offline */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadDocuments, mergeImportPoll]);
 
   useEffect(() => {
     const valid = new Set(docs.map((d) => d.id));
@@ -305,6 +497,7 @@ export default function App() {
 
   useEffect(() => {
     setDocTitleEditing(false);
+    setSavingDocTitle(false);
   }, [selectedId]);
 
   const visible = useMemo(
@@ -312,10 +505,18 @@ export default function App() {
     [slides, hideNoHl, starredOnly],
   );
 
+  /** Oldest job at top of footer, newest at bottom (job_id order). */
+  const importJobEntriesSorted = useMemo(
+    () =>
+      Object.entries(importJobUi).sort(
+        (a, b) => Number(a[0]) - Number(b[0]),
+      ),
+    [importJobUi],
+  );
+
   const processingUpload = uploading;
   const processingRescan = rescanning;
-  const processingBusy = processingUpload || processingRescan;
-  const rescanOverlayDescription = "Rescanning highlights from the stored PDF…";
+  const processingBusy = processingUpload || processingRescan || exporting;
 
   const onUploadPick = () => fileRef.current?.click();
 
@@ -331,16 +532,83 @@ export default function App() {
       }
       const res = await fetch("/upload", { method: "POST", body: form });
       if (!res.ok) throw new Error(await res.text());
-      const data = (await res.json()) as UploadResponse;
-      for (const w of data.warnings) {
+      const data = (await res.json()) as UploadQueuedResponse | UploadResponse;
+      const warnings = data.warnings ?? [];
+      for (const w of warnings) {
         message.warning(`${w.filename}: ${w.message}`, 8);
       }
-      if (data.results.length) {
-        const last = data.results[data.results.length - 1]!;
-        setSelectedId(last.document_id);
+
+      // Jobs are queued on the server; allow another import while this batch finishes.
+      setUploading(false);
+
+      if (res.status === 202 && "jobs" in data && data.jobs.length) {
+        const batch = data.jobs;
+        setImportJobUi((prev) => {
+          const next = { ...prev };
+          for (const j of batch) {
+            next[j.job_id] = {
+              filename: j.filename,
+              status: "pending",
+              progress_label: "Queued…",
+            };
+          }
+          return next;
+        });
+        for (const j of batch) {
+          pollingImportJobIdsRef.current.add(j.job_id);
+        }
+        try {
+          const outcomes = await Promise.all(
+            batch.map((j) =>
+              pollImportJob(j.job_id, 900, mergeImportPoll),
+            ),
+          );
+          let lastDocId: number | undefined;
+          let failCount = 0;
+          for (const o of outcomes) {
+            if (o.status === "failed") {
+              failCount += 1;
+              message.error(
+                `${o.filename}: ${o.error_message ?? "Import failed"}`,
+                10,
+              );
+            } else {
+              for (const w of o.warnings) {
+                message.warning(`${w.filename}: ${w.message}`, 8);
+              }
+              if (o.result?.document_id != null) {
+                lastDocId = o.result.document_id;
+              }
+            }
+          }
+          if (lastDocId != null) setSelectedId(lastDocId);
+          await loadDocuments();
+          if (failCount === 0) message.success("Upload complete");
+          else if (failCount < outcomes.length)
+            message.warning("Some uploads failed");
+        } catch (pollErr) {
+          message.error(String(pollErr));
+        } finally {
+          for (const j of batch) {
+            pollingImportJobIdsRef.current.delete(j.job_id);
+          }
+          setImportJobUi((prev) => {
+            const next = { ...prev };
+            for (const j of batch) {
+              delete next[j.job_id];
+            }
+            return next;
+          });
+        }
+      } else {
+        const sync = data as UploadResponse;
+        if (sync.results.length) {
+          const last = sync.results[sync.results.length - 1]!;
+          setSelectedId(last.document_id);
+        }
+        await loadDocuments();
+        if (sync.results.length) message.success("Upload complete");
       }
-      await loadDocuments();
-      message.success("Upload complete");
     } catch (err) {
       message.error(String(err));
     } finally {
@@ -351,6 +619,7 @@ export default function App() {
   const exportSelected = async () => {
     const ids = Array.from(exportCheckedIds);
     if (ids.length === 0) return;
+    setExporting(true);
     try {
       const params = new URLSearchParams();
       for (const id of ids) params.append("document_ids", String(id));
@@ -365,6 +634,8 @@ export default function App() {
       URL.revokeObjectURL(url);
     } catch (e) {
       message.error(String(e));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -378,6 +649,7 @@ export default function App() {
   }, []);
 
   const patchHide = async (slideId: number, hidden: boolean) => {
+    setPendingHideSlideIds((prev) => new Set(prev).add(slideId));
     try {
       await apiJson(`/slides/${slideId}/hide`, {
         method: "PATCH",
@@ -391,10 +663,17 @@ export default function App() {
       );
     } catch (e) {
       message.error(String(e));
+    } finally {
+      setPendingHideSlideIds((prev) => {
+        const next = new Set(prev);
+        next.delete(slideId);
+        return next;
+      });
     }
   };
 
   const patchStarred = async (highlightId: number, starred: boolean) => {
+    setPendingStarIds((prev) => new Set(prev).add(highlightId));
     try {
       await apiJson(`/highlights/${highlightId}/very-important`, {
         method: "PATCH",
@@ -413,6 +692,12 @@ export default function App() {
       );
     } catch (e) {
       message.error(String(e));
+    } finally {
+      setPendingStarIds((prev) => {
+        const next = new Set(prev);
+        next.delete(highlightId);
+        return next;
+      });
     }
   };
 
@@ -437,6 +722,7 @@ export default function App() {
       setDocTitleEditing(false);
       return;
     }
+    setSavingDocTitle(true);
     try {
       await apiJson<{ id: number; filename: string }>(
         `/documents/${selectedId}`,
@@ -455,6 +741,7 @@ export default function App() {
     } catch (e) {
       message.error(String(e));
     } finally {
+      setSavingDocTitle(false);
       setDocTitleEditing(false);
     }
   };
@@ -467,6 +754,7 @@ export default function App() {
     if (oldIndex < 0 || newIndex < 0) return;
     const next = arrayMove(docs, oldIndex, newIndex);
     setDocs(next);
+    setReorderingDocuments(true);
     try {
       await apiJson("/documents/reorder", {
         method: "POST",
@@ -476,10 +764,13 @@ export default function App() {
     } catch (e) {
       message.error(String(e));
       void loadDocuments();
+    } finally {
+      setReorderingDocuments(false);
     }
   };
 
   const deleteDocument = async (docId: number) => {
+    setDeletingDocId(docId);
     try {
       await apiJson(`/documents/${docId}`, { method: "DELETE" });
       setExportCheckedIds((prev) => {
@@ -495,6 +786,8 @@ export default function App() {
       message.success("Document removed");
     } catch (e) {
       message.error(String(e));
+    } finally {
+      setDeletingDocId(null);
     }
   };
 
@@ -523,6 +816,7 @@ export default function App() {
   };
 
   const removeHighlight = async (highlightId: number) => {
+    setPendingDeleteIds((prev) => new Set(prev).add(highlightId));
     try {
       await apiJson(`/highlights/${highlightId}`, { method: "DELETE" });
       setSlides((prev) =>
@@ -539,6 +833,12 @@ export default function App() {
       await loadDocuments();
     } catch (e) {
       message.error(String(e));
+    } finally {
+      setPendingDeleteIds((prev) => {
+        const next = new Set(prev);
+        next.delete(highlightId);
+        return next;
+      });
     }
   };
 
@@ -567,6 +867,7 @@ export default function App() {
 
   const addHighlightNote = async (slideId: number) => {
     if (selectedId == null) return;
+    setPendingAddNoteSlideIds((prev) => new Set(prev).add(slideId));
     try {
       const data = await apiJson<{ highlight_id: number }>(
         `/slides/${slideId}/highlights`,
@@ -581,6 +882,12 @@ export default function App() {
       await loadDocuments();
     } catch (e) {
       message.error(String(e));
+    } finally {
+      setPendingAddNoteSlideIds((prev) => {
+        const next = new Set(prev);
+        next.delete(slideId);
+        return next;
+      });
     }
   };
 
@@ -612,7 +919,8 @@ export default function App() {
                       type="primary"
                       className="app-sider-tool-import"
                       icon={<UploadOutlined />}
-                      disabled={processingBusy}
+                      loading={uploading}
+                      disabled={processingRescan || exporting}
                       onClick={onUploadPick}
                     >
                       Import New
@@ -622,7 +930,13 @@ export default function App() {
                     <Button
                       className="app-sider-tool-export"
                       icon={<ExportOutlined />}
-                      disabled={processingBusy || exportCheckedIds.size === 0}
+                      loading={exporting}
+                      disabled={
+                        uploading ||
+                        rescanning ||
+                        exportCheckedIds.size === 0 ||
+                        exporting
+                      }
                       onClick={() => void exportSelected()}
                       aria-label="Export selected"
                     />
@@ -634,31 +948,25 @@ export default function App() {
                   accept="application/pdf,.pdf"
                   multiple
                   hidden
-                  disabled={processingBusy}
+                  disabled={uploading || processingRescan || exporting}
                   onChange={(e) => void onFiles(e)}
                 />
               </div>
               <div className="app-sider-divider" role="separator" />
             </div>
-            <div className="app-sider-scroll">
-              <div className="app-sider-scroll-inner">
-                {uploading ?
+            <div className="app-sider-middle">
+              <div className="app-sider-doc-scroll">
+                {reorderingDocuments ?
                   <div
-                    className="doc-list-placeholder-row"
-                    aria-busy="true"
+                    className="doc-list-reorder-status"
+                    role="status"
                     aria-live="polite"
                   >
-                    <span className="doc-list-placeholder-drag" aria-hidden />
-                    <div className="doc-list-placeholder-body">
-                      <LoadingOutlined
-                        className="doc-list-placeholder-icon"
-                        spin
-                        aria-hidden
-                      />
-                      <Text type="secondary">Importing PDF…</Text>
-                    </div>
+                    <LoadingOutlined spin aria-hidden />
+                    <Text type="secondary">Saving order…</Text>
                   </div>
-                : loadingDocs && docs.length === 0 ?
+                : null}
+                {loadingDocs && docs.length === 0 ?
                   <div
                     className="doc-list-placeholder-row"
                     aria-busy="true"
@@ -675,7 +983,10 @@ export default function App() {
                     </div>
                   </div>
                 : null}
-                {docs.length === 0 && !uploading && !loadingDocs ?
+                {docs.length === 0 &&
+                !uploading &&
+                !loadingDocs &&
+                Object.keys(importJobUi).length === 0 ?
                   <div className="doc-list-empty">No PDFs yet</div>
                 : docs.length > 0 ?
                   <DndContext
@@ -699,6 +1010,9 @@ export default function App() {
                             onExportCheckChange={(checked) =>
                               setExportChecked(d.id, checked)
                             }
+                            deleting={deletingDocId === d.id}
+                            disableDrag={reorderingDocuments}
+                            hiddenDuringImport={hiddenImportDocIds.has(d.id)}
                           />
                         ))}
                       </div>
@@ -707,6 +1021,79 @@ export default function App() {
                 : null}
               </div>
             </div>
+            {importJobEntriesSorted.length > 0 ?
+              <div
+                className="app-sider-import-footer"
+                aria-label="Imports in progress"
+              >
+                {importJobEntriesSorted.map(([idStr, row]) => {
+                  const jobId = Number(idStr);
+                  const pct =
+                    row.progress_percent != null &&
+                    Number.isFinite(row.progress_percent) ?
+                      Math.round(row.progress_percent)
+                    : undefined;
+                  const cur = row.progress_current;
+                  const tot = row.progress_total;
+                  const hasRatio =
+                    cur != null && tot != null && tot > 0;
+                  const remaining =
+                    hasRatio && cur != null && tot != null ?
+                      Math.max(0, tot - cur)
+                    : null;
+                  return (
+                    <div
+                      key={jobId}
+                      className="doc-list-import-row"
+                      role="status"
+                      aria-live="polite"
+                      aria-busy={
+                        row.status !== "completed" &&
+                        row.status !== "failed"
+                      }
+                    >
+                      <div className="doc-list-import-body">
+                        <Text
+                          ellipsis
+                          className="doc-list-import-filename"
+                          title={row.filename}
+                        >
+                          {row.filename}
+                        </Text>
+                        {pct != null ?
+                          <Progress percent={pct} size="small" />
+                        : <Progress
+                            percent={0}
+                            status="active"
+                            size="small"
+                            showInfo={false}
+                          />
+                        }
+                        <div className="doc-list-import-meta">
+                          <Text
+                            type="secondary"
+                            className="doc-list-import-label"
+                          >
+                            {row.progress_label ?? "Working…"}
+                          </Text>
+                          {hasRatio && cur != null && tot != null ?
+                            <Text
+                              type="secondary"
+                              className="doc-list-import-count"
+                            >
+                              {cur} / {tot}
+                              {remaining != null && remaining > 0 ?
+                                ` (${remaining} left)`
+                              : null}
+                            </Text>
+                          : null}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            : null}
           </Sider>
           <Content className="app-main">
             <div className="main-column">
@@ -725,7 +1112,13 @@ export default function App() {
                         }
                       >
                         {docTitleEditing ?
-                          <Input
+                          savingDocTitle ?
+                            <Skeleton.Input
+                              active
+                              className="main-doc-title-skeleton"
+                              aria-label="Saving title"
+                            />
+                        : <Input
                             variant="borderless"
                             autoFocus
                             maxLength={500}
@@ -801,6 +1194,10 @@ export default function App() {
                           <SlideCard
                             key={s.slide_id}
                             slide={s}
+                            hideBusy={pendingHideSlideIds.has(s.slide_id)}
+                            addNoteBusy={pendingAddNoteSlideIds.has(s.slide_id)}
+                            pendingStarIds={pendingStarIds}
+                            pendingDeleteIds={pendingDeleteIds}
                             onHide={() =>
                               void patchHide(s.slide_id, !s.is_hidden)
                             }
@@ -842,24 +1239,16 @@ export default function App() {
           : null}
         </Modal>
       </Layout>
-      {processingRescan ?
-        <div
-          className="app-processing-overlay"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="app-processing-overlay-inner">
-            <Spin size="large" />
-            <Text type="secondary">{rescanOverlayDescription}</Text>
-          </div>
-        </div>
-      : null}
     </>
   );
 }
 
 function SlideCard({
   slide,
+  hideBusy,
+  addNoteBusy,
+  pendingStarIds,
+  pendingDeleteIds,
   onHide,
   onToggleStarred,
   onDelete,
@@ -870,9 +1259,13 @@ function SlideCard({
   onImageClick,
 }: {
   slide: SlideRow;
+  hideBusy: boolean;
+  addNoteBusy: boolean;
+  pendingStarIds: Set<number>;
+  pendingDeleteIds: Set<number>;
   onHide: () => void;
-  onToggleStarred: (id: number, starred: boolean) => void;
-  onDelete: (id: number) => void;
+  onToggleStarred: (id: number, starred: boolean) => void | Promise<void>;
+  onDelete: (id: number) => void | Promise<void>;
   onSaveText: (id: number, text: string) => Promise<void>;
   onAddNote: () => void;
   focusNewNoteHighlightId: number | null;
@@ -912,7 +1305,12 @@ function SlideCard({
       <Card size="small" style={{ marginBottom: 12 }}>
         <Flex justify="space-between" align="center">
           <Text type="secondary">Slide {slide.page_number} — hidden</Text>
-          <Button size="small" icon={<EyeOutlined />} onClick={onHide}>
+          <Button
+            size="small"
+            loading={hideBusy}
+            icon={hideBusy ? undefined : <EyeOutlined />}
+            onClick={onHide}
+          >
             Show
           </Button>
         </Flex>
@@ -930,7 +1328,8 @@ function SlideCard({
           <Button
             size="small"
             type="text"
-            icon={<EyeInvisibleOutlined />}
+            loading={hideBusy}
+            icon={hideBusy ? undefined : <EyeInvisibleOutlined />}
             onClick={onHide}
             aria-label="Hide slide"
           />
@@ -978,6 +1377,8 @@ function SlideCard({
                           onSave={onSaveText}
                           onToggleStarred={onToggleStarred}
                           onDelete={onDelete}
+                          starSaving={pendingStarIds.has(h.id)}
+                          deleteSaving={pendingDeleteIds.has(h.id)}
                           autoFocus={focusNewNoteHighlightId === h.id}
                           onAutoFocusDone={onNewNoteFocusHandled}
                         />
@@ -990,7 +1391,8 @@ function SlideCard({
                 <Button
                   type="dashed"
                   block
-                  icon={<PlusOutlined />}
+                  loading={addNoteBusy}
+                  icon={addNoteBusy ? undefined : <PlusOutlined />}
                   onClick={onAddNote}
                   aria-label="Add note"
                 >

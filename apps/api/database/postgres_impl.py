@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
@@ -16,6 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = REPO_ROOT / "data"
 SLIDES_ROOT = DATA_DIR / "slides"
 ORIGINALS_DIR = DATA_DIR / "originals"
+IMPORT_PENDING_DIR = DATA_DIR / "import_pending"
 
 
 def _dsn() -> str:
@@ -37,6 +39,7 @@ def ensure_data_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     SLIDES_ROOT.mkdir(parents=True, exist_ok=True)
     ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
+    IMPORT_PENDING_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def init_db() -> None:
@@ -499,3 +502,174 @@ def export_highlights_plain(
                     r["extracted_text"],
                     bool(r["is_very_important"]),
                 )
+
+
+def create_import_job(filename: str, temp_pdf_path: str) -> int:
+    ensure_data_dirs()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO import_jobs (filename, temp_pdf_path, status)
+                VALUES (%s, %s, 'pending')
+                RETURNING id
+                """,
+                (filename, temp_pdf_path),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            return int(row["id"])
+
+
+def update_import_job_status(job_id: int, status: str) -> None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE import_jobs SET status = %s WHERE id = %s",
+                (status, job_id),
+            )
+
+
+def update_import_job_document_id(job_id: int, document_id: int) -> None:
+    """Link job to documents row as soon as it exists (client hides sidebar dup)."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE import_jobs SET document_id = %s WHERE id = %s",
+                (document_id, job_id),
+            )
+
+
+def update_import_job_progress(
+    job_id: int,
+    progress_current: int | None,
+    progress_total: int | None,
+    progress_label: str | None,
+) -> None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE import_jobs
+                SET progress_current = %s, progress_total = %s, progress_label = %s
+                WHERE id = %s
+                """,
+                (progress_current, progress_total, progress_label, job_id),
+            )
+
+
+def complete_import_job(
+    job_id: int,
+    document_id: int,
+    result: dict[str, Any],
+    warnings: list[dict[str, Any]],
+) -> None:
+    payload = {"result": result, "warnings": warnings}
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE import_jobs
+                SET status = 'completed', document_id = %s, error_message = NULL,
+                    result_json = %s::jsonb,
+                    progress_current = NULL, progress_total = NULL, progress_label = NULL
+                WHERE id = %s
+                """,
+                (document_id, json.dumps(payload), job_id),
+            )
+
+
+def fail_import_job(job_id: int, error_message: str) -> None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE import_jobs
+                SET status = 'failed', error_message = %s,
+                    progress_current = NULL, progress_total = NULL, progress_label = NULL
+                WHERE id = %s
+                """,
+                (error_message[:8000], job_id),
+            )
+
+
+def _import_job_row_to_public(row: Any) -> dict[str, Any]:
+    """Map import_jobs row to API shape (shared by get + list)."""
+    pc = row["progress_current"]
+    pt = row["progress_total"]
+    pct: int | None = None
+    if pc is not None and pt is not None:
+        try:
+            c, t = int(pc), int(pt)
+            if t > 0:
+                pct = min(100, max(0, int(round(100.0 * c / t))))
+        except (TypeError, ValueError):
+            pass
+    out: dict[str, Any] = {
+        "job_id": int(row["id"]),
+        "filename": row["filename"],
+        "status": row["status"],
+        "document_id": int(row["document_id"])
+        if row["document_id"] is not None
+        else None,
+        "error_message": row["error_message"],
+        "progress_current": int(pc) if pc is not None else None,
+        "progress_total": int(pt) if pt is not None else None,
+        "progress_label": row["progress_label"],
+        "progress_percent": pct,
+    }
+    if row["result_json"]:
+        rj = row["result_json"]
+        data = json.loads(rj) if isinstance(rj, str) else rj
+        out["result"] = data.get("result")
+        out["warnings"] = data.get("warnings", [])
+    else:
+        out["result"] = None
+        out["warnings"] = []
+    return out
+
+
+def get_import_job_public(job_id: int) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, filename, status, document_id, error_message, result_json,
+                       progress_current, progress_total, progress_label
+                FROM import_jobs WHERE id = %s
+                """,
+                (job_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return _import_job_row_to_public(row)
+
+
+def list_active_import_jobs() -> list[dict[str, Any]]:
+    """Jobs still queued or running (for UI recovery after refresh)."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, filename, status, document_id, error_message, result_json,
+                       progress_current, progress_total, progress_label
+                FROM import_jobs
+                WHERE status IN ('pending', 'processing')
+                ORDER BY created_at ASC
+                """
+            )
+            return [_import_job_row_to_public(row) for row in cur.fetchall()]
+
+
+def get_import_job_temp_path(job_id: int) -> tuple[str, str] | None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT temp_pdf_path, filename, status FROM import_jobs WHERE id = %s",
+                (job_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return (str(row["temp_pdf_path"]), str(row["filename"]))

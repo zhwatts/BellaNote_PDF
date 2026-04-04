@@ -46,6 +46,8 @@ export function HighlightTextarea({
   onSave,
   onToggleStarred,
   onDelete,
+  starSaving = false,
+  deleteSaving = false,
   autoFocus = false,
   onAutoFocusDone,
 }: {
@@ -53,8 +55,10 @@ export function HighlightTextarea({
   value: string
   isStarred: boolean
   onSave: (id: number, text: string) => Promise<void>
-  onToggleStarred: (id: number, starred: boolean) => void
-  onDelete: (id: number) => void
+  onToggleStarred: (id: number, starred: boolean) => void | Promise<void>
+  onDelete: (id: number) => void | Promise<void>
+  starSaving?: boolean
+  deleteSaving?: boolean
   /** Focus editor once after mount (e.g. newly added note). */
   autoFocus?: boolean
   onAutoFocusDone?: () => void
@@ -239,26 +243,26 @@ export function HighlightTextarea({
                 size="small"
                 type={isStarred ? 'primary' : 'default'}
                 aria-label={isStarred ? 'Unstar note' : 'Star note'}
+                loading={starSaving}
                 icon={
-                  isStarred ? (
+                  starSaving ? undefined : isStarred ? (
                     <StarFilled />
                   ) : (
                     <StarOutlined />
                   )
                 }
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() =>
-                  onToggleStarred(highlightId, !isStarred)
-                }
+                onClick={() => void onToggleStarred(highlightId, !isStarred)}
               />
               <Button
                 size="small"
                 danger
                 type="default"
                 aria-label="Delete note"
-                icon={<DeleteOutlined />}
+                loading={deleteSaving}
+                icon={deleteSaving ? undefined : <DeleteOutlined />}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onDelete(highlightId)}
+                onClick={() => void onDelete(highlightId)}
               />
             </Flex>
             <div onBlurCapture={flushOnBlur}>

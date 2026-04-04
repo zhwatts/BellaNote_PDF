@@ -90,7 +90,8 @@
   align-self: stretch;
 }
 
-.app-sider-scroll {
+/* Fills space between header and import footer; only inner doc list scrolls. */
+.app-sider-middle {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -99,13 +100,24 @@
   padding: 0;
 }
 
-.app-sider-scroll-inner {
+.app-sider-doc-scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* Pending imports: pinned to bottom of sider; scrolls independently if many jobs */
+.app-sider-import-footer {
+  flex-shrink: 0;
+  max-height: min(42vh, 320px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-top: 1px solid var(--reme-border);
+  background: rgba(255, 255, 255, 0.45);
+  padding-bottom: 4px;
 }
 
 .doc-list-empty {
@@ -182,6 +194,70 @@
   border-bottom: 1px solid var(--reme-row-line);
 }
 
+.doc-list-row--busy {
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+/* Same PDF is listed under import progress; hide duplicate doc row until ingest completes. */
+.doc-list-row--hidden-import {
+  display: none !important;
+}
+
+.doc-list-reorder-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 6px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--reme-row-line);
+  color: var(--reme-text-secondary);
+}
+
+.doc-list-import-row {
+  display: flex;
+  align-items: flex-start;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--reme-row-line);
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.doc-list-import-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.doc-list-import-filename {
+  display: block;
+  width: 100%;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--reme-text);
+}
+
+.doc-list-import-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.doc-list-import-label {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.doc-list-import-count {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.doc-list-import-body .ant-progress-line {
+  margin-bottom: 0;
+}
+
 .doc-export-checkbox-wrap {
   flex-shrink: 0;
   opacity: 0;
@@ -210,7 +286,7 @@
   color: var(--reme-text);
 }
 
-.doc-list-highlight-count {
+.doc-list-slide-count {
   font-size: 12px;
   line-height: 1.35;
   margin: 0 !important;
@@ -297,6 +373,15 @@
 
 .main-doc-title-slot--editing {
   background-color: var(--reme-accent-soft);
+}
+
+.main-doc-title-skeleton {
+  width: min(100%, 420px) !important;
+  min-width: 120px;
+}
+
+.main-doc-title-skeleton.ant-skeleton-input {
+  height: 1.75rem !important;
 }
 
 .main-doc-title {

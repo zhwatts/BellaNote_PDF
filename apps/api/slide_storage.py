@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 STORAGE_PREFIX = "storage:"
@@ -27,7 +28,13 @@ _supabase = None
 def _client():
     global _supabase
     if _supabase is None:
-        from supabase import create_client
+        try:
+            from supabase import create_client
+        except ImportError as e:
+            raise RuntimeError(
+                "The 'supabase' package is not installed but Storage env vars are set. "
+                "Run: pip install -r requirements.txt"
+            ) from e
 
         url = (os.environ.get("SUPABASE_URL") or "").strip().rstrip("/")
         key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
@@ -52,7 +59,12 @@ def public_url_from_db_path(image_path: str) -> str:
     return _client().storage.from_(_bucket()).get_public_url(key)
 
 
-def upload_pages_from_dir(doc_id: int, slide_dir: Path, total_pages: int) -> None:
+def upload_pages_from_dir(
+    doc_id: int,
+    slide_dir: Path,
+    total_pages: int,
+    on_page_done: Callable[[int, int], None] | None = None,
+) -> None:
     """Upload page_1.png … from slide_dir to Supabase Storage; overwrites if present."""
     sb = _client().storage.from_(_bucket())
     for page in range(1, total_pages + 1):
@@ -67,6 +79,8 @@ def upload_pages_from_dir(doc_id: int, slide_dir: Path, total_pages: int) -> Non
                 "upsert": "true",
             },
         )
+        if on_page_done is not None:
+            on_page_done(page, total_pages)
 
 
 def delete_objects_for_paths(image_paths: list[str]) -> None:

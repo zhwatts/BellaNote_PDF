@@ -18,8 +18,13 @@ from typing import Annotated
 
 import database as db
 import slide_storage
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 from pdf_processor import (
@@ -80,24 +85,45 @@ def _slide_render_dpi() -> int:
     return 150
 
 
-def _ingest_single_pdf(tmp_path: str, filename: str) -> tuple[dict, list[dict]]:
+def _ingest_single_pdf(
+    tmp_path: str,
+    filename: str,
+    job_id: int | None = None,
+) -> tuple[dict, list[dict]]:
     """
     Blocking: extract highlights, render slides, DB rows, optional Storage upload.
     Run via asyncio.to_thread so /health stays reachable on a single worker.
     """
     warnings: list[dict] = []
+
+    def _progress(
+        cur: int | None,
+        tot: int | None,
+        label: str | None,
+    ) -> None:
+        if job_id is not None:
+            db.update_import_job_progress(job_id, cur, tot, label)
+
     log.info("ingest start file=%s", filename)
+    _progress(None, None, "Extracting highlights…")
     raw_highlights = extract_highlights(tmp_path)
     total_pages = count_pages(tmp_path)
     by_page = _group_highlights_by_page(raw_highlights)
     highlights_found = sum(len(v) for v in by_page.values())
     log.info("ingest extracted highlights file=%s pages=%s", filename, total_pages)
 
+    if total_pages < 1:
+        _progress(1, 1, "No pages in PDF")
+    else:
+        _progress(0, total_pages, "Creating document…")
+
     doc_id, slide_dir = db.insert_document_record(
         filename=filename,
         original_path=None,
         total_pages=total_pages,
     )
+    if job_id is not None:
+        db.update_import_job_document_id(job_id, doc_id)
     dpi = _slide_render_dpi()
     try:
         db.ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
@@ -111,7 +137,23 @@ def _ingest_single_pdf(tmp_path: str, filename: str) -> tuple[dict, list[dict]]:
             dpi,
             slide_dir,
         )
-        render_pdf_pages_to_png(tmp_path, slide_dir, dpi=dpi)
+
+        def _on_render_page(page_num: int, n_pages: int) -> None:
+            _progress(
+                page_num,
+                n_pages,
+                f"Rendering page {page_num} of {n_pages}",
+            )
+
+        if total_pages < 1:
+            pass
+        else:
+            render_pdf_pages_to_png(
+                tmp_path,
+                slide_dir,
+                dpi=dpi,
+                on_page_done=_on_render_page,
+            )
         log.info("ingest render done doc_id=%s", doc_id)
         if slide_storage.is_enabled():
             log.info(
@@ -119,7 +161,20 @@ def _ingest_single_pdf(tmp_path: str, filename: str) -> tuple[dict, list[dict]]:
                 doc_id,
                 total_pages,
             )
-            slide_storage.upload_pages_from_dir(doc_id, slide_dir, total_pages)
+
+            def _on_upload_page(page_num: int, n_pages: int) -> None:
+                _progress(
+                    page_num,
+                    n_pages,
+                    f"Uploading page {page_num} of {n_pages}",
+                )
+
+            slide_storage.upload_pages_from_dir(
+                doc_id,
+                slide_dir,
+                total_pages,
+                on_page_done=_on_upload_page,
+            )
             shutil.rmtree(slide_dir, ignore_errors=True)
             slide_paths = [
                 slide_storage.db_path_for_page(doc_id, p)
@@ -130,6 +185,14 @@ def _ingest_single_pdf(tmp_path: str, filename: str) -> tuple[dict, list[dict]]:
                 str(slide_dir / f"page_{p}.png")
                 for p in range(1, total_pages + 1)
             ]
+        if total_pages > 0:
+            _progress(
+                total_pages,
+                total_pages,
+                "Saving slides and highlights…",
+            )
+        else:
+            _progress(1, 1, "Saving slides and highlights…")
         db.insert_slides_and_highlights(doc_id, total_pages, slide_paths, by_page)
         log.info("ingest complete doc_id=%s file=%s", doc_id, filename)
     except Exception:
@@ -213,6 +276,41 @@ def _group_highlights_by_page(items: list[dict]) -> dict[int, list[str]]:
     return dict(by_page)
 
 
+async def _run_import_job(job_id: int) -> None:
+    """Runs after HTTP 202 so the client is not tied to proxy/worker time limits."""
+    pair = db.get_import_job_temp_path(job_id)
+    if not pair:
+        log.error("import job missing row job_id=%s", job_id)
+        return
+    tmp_path, filename = pair
+    db.update_import_job_status(job_id, "processing")
+    try:
+        result, warns = await asyncio.to_thread(
+            _ingest_single_pdf,
+            tmp_path,
+            filename,
+            job_id,
+        )
+        db.complete_import_job(
+            job_id,
+            int(result["document_id"]),
+            result,
+            warns,
+        )
+        log.info(
+            "import job done job_id=%s doc_id=%s file=%s",
+            job_id,
+            result["document_id"],
+            filename,
+        )
+    except Exception as e:  # noqa: BLE001 — persist message for client poll
+        log.exception("import job failed job_id=%s file=%s", job_id, filename)
+        db.fail_import_job(job_id, str(e))
+    finally:
+        with suppress(OSError):
+            os.unlink(tmp_path)
+
+
 def _purge_document_files(doc_id: int) -> None:
     """Remove DB rows, slide PNG folder or Supabase objects, and stored original PDF."""
     slide_paths = db.get_slide_image_paths_for_document(doc_id)
@@ -230,13 +328,17 @@ def _purge_document_files(doc_id: int) -> None:
             shutil.rmtree(p, ignore_errors=True)
 
 
-@app.post("/upload")
-@app.post("/upload/")
-async def upload(files: list[UploadFile] = File(...)) -> dict:
+@app.post("/upload", response_model=None)
+@app.post("/upload/", response_model=None)
+async def upload(
+    background_tasks: BackgroundTasks,
+    files: list[UploadFile] = File(...),
+) -> JSONResponse | dict:
     log.info("upload handler entered file_count=%s", len(files))
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
-    results: list[dict] = []
+    db.ensure_data_dirs()
+    jobs: list[dict[str, int | str]] = []
     warnings: list[dict] = []
 
     for file in files:
@@ -250,7 +352,10 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
             continue
 
         suffix = Path(file.filename).suffix or ".pdf"
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            suffix=suffix,
+            dir=db.IMPORT_PENDING_DIR,
+        )
         os.close(tmp_fd)
         try:
             log.info("upload reading multipart body filename=%s", file.filename)
@@ -262,23 +367,42 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
             )
             Path(tmp_path).write_bytes(data)
 
-            log.info("upload dispatching ingest thread filename=%s", file.filename)
-            # Run CPU/IO-heavy work off the asyncio event loop so /health and
-            # other requests are not blocked (avoids Render marking the instance unhealthy).
-            result, file_warnings = await asyncio.to_thread(
-                _ingest_single_pdf,
-                tmp_path,
+            job_id = db.create_import_job(file.filename, tmp_path)
+            jobs.append({"job_id": job_id, "filename": file.filename})
+            background_tasks.add_task(_run_import_job, job_id)
+            log.info(
+                "upload queued import job_id=%s filename=%s",
+                job_id,
                 file.filename,
             )
-            results.append(result)
-            warnings.extend(file_warnings)
-            log.info("upload ingest finished filename=%s", file.filename)
-        finally:
+        except Exception:
             with suppress(OSError):
                 os.unlink(tmp_path)
+            raise
 
-    log.info("upload response ready results=%s", len(results))
-    return {"results": results, "warnings": warnings}
+    log.info("upload response ready jobs=%s", len(jobs))
+    if jobs:
+        return JSONResponse(
+            status_code=202,
+            content={"jobs": jobs, "warnings": warnings},
+        )
+    return {"results": [], "warnings": warnings}
+
+
+@app.get("/import/jobs/active")
+@app.get("/import/jobs/active/")
+def list_active_import_jobs() -> dict:
+    """Return pending/processing jobs so the SPA can resume progress UI after refresh."""
+    return {"jobs": db.list_active_import_jobs()}
+
+
+@app.get("/import/jobs/{job_id}")
+@app.get("/import/jobs/{job_id}/")
+def get_import_job_status(job_id: int) -> dict:
+    row = db.get_import_job_public(job_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Import job not found")
+    return row
 
 
 @app.get("/documents")

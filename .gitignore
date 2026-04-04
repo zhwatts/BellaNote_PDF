@@ -40,6 +40,7 @@ data/slides/**/*
 !data/slides/.gitkeep
 data/originals/**/*
 !data/originals/.gitkeep
+data/import_pending/**/*
 
 # --- OS & editors ---
 .DS_Store

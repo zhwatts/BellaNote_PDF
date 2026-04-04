@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict
 
@@ -392,19 +393,27 @@ def render_pdf_pages_to_png(
     pdf_path: str | Path,
     output_dir: str | Path,
     dpi: int = 150,
+    on_page_done: Callable[[int, int], None] | None = None,
 ) -> int:
     """
     Render each PDF page to PNG. Files: page_1.png, page_2.png, ...
     Returns total page count.
+
+    on_page_done(page_number, total_pages) is called after each page is written
+    (1-based page index).
     """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     path = str(pdf_path)
-    images = convert_from_path(path, dpi=dpi)
-    for i, pil_image in enumerate(images):
-        dest = out / f"page_{i + 1}.png"
+    n_pages = count_pages(path)
+    for p in range(1, n_pages + 1):
+        images = convert_from_path(path, dpi=dpi, first_page=p, last_page=p)
+        pil_image = images[0]
+        dest = out / f"page_{p}.png"
         if isinstance(pil_image, Image.Image):
             pil_image.save(dest, "PNG")
         else:
             pil_image.save(str(dest), "PNG")
-    return len(images)
+        if on_page_done is not None:
+            on_page_done(p, n_pages)
+    return n_pages
