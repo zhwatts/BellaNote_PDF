@@ -50,6 +50,7 @@ import {
   ArrowUpOutlined,
   DeleteOutlined,
   ExportOutlined,
+  FileTextOutlined,
   PlusOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
@@ -148,6 +149,14 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error(err || res.statusText);
   }
   return res.json() as Promise<T>;
+}
+
+/** Absolute URL for slide image (API may return Supabase or same-origin path). */
+function slideImageUrlForLightbox(imageUrl: string): string {
+  if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+    return imageUrl;
+  }
+  return `${window.location.origin}${imageUrl}`;
 }
 
 async function pollImportJob(
@@ -420,6 +429,7 @@ export default function App() {
     () => new Set<number>(),
   );
   const [exporting, setExporting] = useState(false);
+  const [exportingNotes, setExportingNotes] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   const screens = Grid.useBreakpoint();
@@ -440,6 +450,8 @@ export default function App() {
   const [showScrollTopFab, setShowScrollTopFab] = useState(false);
   /** Prevents duplicate poll loops (e.g. React Strict Mode or recover + upload). */
   const pollingImportJobIdsRef = useRef<Set<number>>(new Set());
+  /** True after `/slides?include_full_text=1` succeeded for the current document (search filter). */
+  const slidesFullTextReadyRef = useRef(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -585,17 +597,31 @@ export default function App() {
     });
   }, [docs]);
 
-  const loadSlides = useCallback(async (docId: number) => {
-    setLoadingSlides(true);
-    try {
-      const rows = await apiJson<SlideRow[]>(`/documents/${docId}/slides`);
-      setSlides(rows);
-    } catch (e) {
-      message.error(String(e));
-    } finally {
-      setLoadingSlides(false);
-    }
-  }, []);
+  const loadSlides = useCallback(
+    async (docId: number, options?: { includeFullText?: boolean }) => {
+      setLoadingSlides(true);
+      try {
+        const qs =
+          options?.includeFullText === true ? "?include_full_text=1" : "";
+        const rows = await apiJson<SlideRow[]>(
+          `/documents/${docId}/slides${qs}`,
+        );
+        setSlides(rows);
+        if (options?.includeFullText === true) {
+          slidesFullTextReadyRef.current = true;
+        }
+      } catch (e) {
+        message.error(String(e));
+      } finally {
+        setLoadingSlides(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    slidesFullTextReadyRef.current = false;
+  }, [selectedId]);
 
   useEffect(() => {
     if (selectedId != null) {
@@ -614,6 +640,17 @@ export default function App() {
     setSavingDocTitle(false);
     setSlideSearch("");
   }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedId == null) return;
+    const q = slideSearch.trim();
+    if (q.length === 0) return;
+    if (slidesFullTextReadyRef.current) return;
+    const t = window.setTimeout(() => {
+      void loadSlides(selectedId, { includeFullText: true });
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [slideSearch, selectedId, loadSlides]);
 
   const visible = useMemo(() => {
     let list = filterSlides(slides, hideNoHl, starredOnly);
@@ -658,7 +695,8 @@ export default function App() {
 
   const processingUpload = uploading;
   const processingRescan = rescanning;
-  const processingBusy = processingUpload || processingRescan || exporting;
+  const processingBusy =
+    processingUpload || processingRescan || exporting || exportingNotes;
 
   const onUploadPick = () => fileRef.current?.click();
 
@@ -776,6 +814,30 @@ export default function App() {
       message.error(String(e));
     } finally {
       setExporting(false);
+    }
+  };
+
+  const exportNotesForFocusedDocument = async () => {
+    if (selectedId == null || !selectedDoc) return;
+    setExportingNotes(true);
+    try {
+      const params = new URLSearchParams();
+      params.append("document_ids", String(selectedId));
+      const res = await fetch(`/export?${params.toString()}`);
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const stem = selectedDoc.filename.replace(/\.[^.]+$/i, "").trim() || "document";
+      const safe = stem.replace(/[<>:"/\\|?*]/g, "_").slice(0, 120);
+      a.download = `${safe || "notes"}-notes.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      setExportingNotes(false);
     }
   };
 
@@ -946,7 +1008,9 @@ export default function App() {
         `Rescan complete: ${data.highlights_found} highlight(s) found`,
       );
       await loadDocuments();
-      await loadSlides(selectedId);
+      await loadSlides(selectedId, {
+        includeFullText: slidesFullTextReadyRef.current,
+      });
     } catch (e) {
       message.error(String(e));
     } finally {
@@ -1016,7 +1080,9 @@ export default function App() {
           body: JSON.stringify({ text: "<p></p>" }),
         },
       );
-      await loadSlides(selectedId);
+      await loadSlides(selectedId, {
+        includeFullText: slidesFullTextReadyRef.current,
+      });
       setFocusNewNoteHighlightId(data.highlight_id);
       await loadDocuments();
     } catch (e) {
@@ -1396,6 +1462,15 @@ export default function App() {
                           >
                             Rescan document
                           </Button>
+                          <Button
+                            icon={<FileTextOutlined />}
+                            loading={exportingNotes}
+                            disabled={processingBusy}
+                            title="Download all notes and highlights for this document as a .txt file"
+                            onClick={() => void exportNotesForFocusedDocument()}
+                          >
+                            Export notes
+                          </Button>
                         </Space>
                         <Text type="secondary">
                           {visible.length} of {slides.length} slides shown
@@ -1428,6 +1503,7 @@ export default function App() {
                             >
                               <SlideCard
                                 slide={s}
+                                imageFetchPriorityHigh={i === 0}
                                 hideBusy={pendingHideSlideIds.has(s.slide_id)}
                                 addNoteBusy={pendingAddNoteSlideIds.has(
                                   s.slide_id,
@@ -1448,9 +1524,7 @@ export default function App() {
                                 }
                                 onNewNoteFocusHandled={clearNewNoteFocus}
                                 onImageClick={() =>
-                                  setLightbox(
-                                    `${window.location.origin}${s.image_url}`,
-                                  )
+                                  setLightbox(slideImageUrlForLightbox(s.image_url))
                                 }
                               />
                             </div>
@@ -1500,6 +1574,7 @@ export default function App() {
 
 function SlideCard({
   slide,
+  imageFetchPriorityHigh,
   hideBusy,
   addNoteBusy,
   pendingStarIds,
@@ -1514,6 +1589,8 @@ function SlideCard({
   onImageClick,
 }: {
   slide: SlideRow;
+  /** First visible slide: higher fetch priority; others defer via lazy loading. */
+  imageFetchPriorityHigh: boolean;
   hideBusy: boolean;
   addNoteBusy: boolean;
   pendingStarIds: Set<number>;
@@ -1608,6 +1685,9 @@ function SlideCard({
               className="slide-image"
               src={slide.image_url}
               alt={`Slide ${slide.page_number}`}
+              loading={imageFetchPriorityHigh ? "eager" : "lazy"}
+              decoding="async"
+              fetchPriority={imageFetchPriorityHigh ? "high" : "auto"}
               onClick={onImageClick}
               onLoad={updateNotesMaxHeight}
             />

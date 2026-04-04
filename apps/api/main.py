@@ -493,10 +493,16 @@ def patch_document(doc_id: int, body: DocumentFilenameBody) -> dict:
 
 
 @app.get("/documents/{doc_id}/slides")
-def get_document_slides(doc_id: int) -> list[dict]:
+def get_document_slides(
+    doc_id: int,
+    include_full_text: Annotated[bool, Query()] = False,
+) -> list[dict]:
     if not db.document_exists(doc_id):
         raise HTTPException(status_code=404, detail="Document not found")
-    return db.get_slides_with_highlights(doc_id)
+    return db.get_slides_with_highlights(
+        doc_id,
+        include_full_text=include_full_text,
+    )
 
 
 @app.get("/slides/{doc_id}/{page_number}", response_model=None)

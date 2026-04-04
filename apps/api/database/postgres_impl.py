@@ -321,11 +321,18 @@ def list_documents() -> list[dict[str, Any]]:
         ]
 
 
-def get_slides_with_highlights(doc_id: int) -> list[dict[str, Any]]:
+def get_slides_with_highlights(
+    doc_id: int,
+    *,
+    include_full_text: bool = False,
+) -> list[dict[str, Any]]:
+    cols = "id, page_number, image_path, has_highlights, is_hidden"
+    if include_full_text:
+        cols += ", full_text"
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            """
-                SELECT id, page_number, image_path, has_highlights, is_hidden, full_text
+            f"""
+                SELECT {cols}
                 FROM slides
                 WHERE document_id = %s
                 ORDER BY page_number
@@ -353,14 +360,22 @@ def get_slides_with_highlights(doc_id: int) -> list[dict[str, Any]]:
                 }
                 for h in hl_rows
             ]
+            ip = str(s.get("image_path") or "")
+            if ip.startswith("storage:"):
+                import slide_storage
+
+                image_url = slide_storage.public_url_from_db_path(ip)
+            else:
+                image_url = f"/slides/{doc_id}/{s['page_number']}"
+            ft = str(s.get("full_text") or "") if include_full_text else ""
             out.append(
                 {
                     "slide_id": s["id"],
                     "page_number": s["page_number"],
-                    "image_url": f"/slides/{doc_id}/{s['page_number']}",
+                    "image_url": image_url,
                     "has_highlights": bool(s["has_highlights"]),
                     "is_hidden": bool(s["is_hidden"]),
-                    "full_text": str(s.get("full_text") or ""),
+                    "full_text": ft,
                     "highlights": highlights,
                 }
             )
