@@ -36,7 +36,6 @@ import {
   Input,
   Layout,
   List,
-  message,
   Modal,
   Progress,
   Row,
@@ -64,6 +63,7 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 import { HighlightTextarea } from "./components/HighlightTextarea";
+import { message } from "./appMessage";
 import { useThemeMode } from "./theme/ThemeProvider";
 import "./App.css";
 
