@@ -381,6 +381,25 @@ def extract_highlights(pdf_path: str | Path) -> list[HighlightItem]:
     return _dedupe_items(pix)
 
 
+def extract_slide_text_by_page(pdf_path: str | Path) -> dict[int, str]:
+    """
+    Full plain text per page (1-based page numbers) for search.
+    Independent of highlight extraction; uses PyMuPDF get_text().
+    """
+    path = str(pdf_path)
+    out: dict[int, str] = {}
+    doc = fitz.open(path)
+    try:
+        for i in range(len(doc)):
+            page = doc[i]
+            raw = (page.get_text() or "").strip()
+            collapsed = " ".join(raw.split())
+            out[i + 1] = collapsed
+    finally:
+        doc.close()
+    return out
+
+
 def count_pages(pdf_path: str | Path) -> int:
     doc = fitz.open(str(pdf_path))
     try:

@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from pdf_processor import (
     count_pages,
     extract_highlights,
+    extract_slide_text_by_page,
     render_pdf_pages_to_png,
 )
 from pydantic import BaseModel, Field
@@ -120,6 +121,7 @@ def _ingest_single_pdf(
     _progress(None, None, "Extracting highlights…")
     raw_highlights = extract_highlights(tmp_path)
     total_pages = count_pages(tmp_path)
+    full_text_by_page = extract_slide_text_by_page(tmp_path)
     by_page = _group_highlights_by_page(raw_highlights)
     highlights_found = sum(len(v) for v in by_page.values())
     log.info("ingest extracted highlights file=%s pages=%s", filename, total_pages)
@@ -205,7 +207,13 @@ def _ingest_single_pdf(
             )
         else:
             _progress(1, 1, "Saving slides and highlights…")
-        db.insert_slides_and_highlights(doc_id, total_pages, slide_paths, by_page)
+        db.insert_slides_and_highlights(
+            doc_id,
+            total_pages,
+            slide_paths,
+            by_page,
+            full_text_by_page,
+        )
         log.info("ingest complete doc_id=%s file=%s", doc_id, filename)
     except Exception:
         log.exception("ingest failed doc_id=%s file=%s", doc_id, filename)
@@ -595,9 +603,11 @@ def rescan_document(doc_id: int) -> dict:
     raw_highlights = extract_highlights(str(pdf_path))
     by_page = _group_highlights_by_page(raw_highlights)
     highlights_found = sum(len(v) for v in by_page.values())
+    full_text_by_page = extract_slide_text_by_page(str(pdf_path))
 
     db.clear_highlights_for_document(doc_id)
     db.insert_highlights_for_document(doc_id, by_page)
+    db.update_slides_full_text(doc_id, full_text_by_page)
 
     warnings: list[dict] = []
     if highlights_found == 0:

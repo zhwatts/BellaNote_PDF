@@ -51,9 +51,9 @@ import {
   PlusOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
-  GlobalOutlined,
   HolderOutlined,
   LoadingOutlined,
+  SearchOutlined,
   SyncOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
@@ -85,6 +85,8 @@ type SlideRow = {
   image_url: string;
   has_highlights: boolean;
   is_hidden: boolean;
+  /** Full page text for search (not shown in UI). */
+  full_text: string;
   highlights: Highlight[];
 };
 
@@ -304,6 +306,7 @@ export default function App() {
   >({});
   const [hideNoHl, setHideNoHl] = useState(false);
   const [starredOnly, setStarredOnly] = useState(false);
+  const [slideSearch, setSlideSearch] = useState("");
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [rescanning, setRescanning] = useState(false);
   const [docTitleEditing, setDocTitleEditing] = useState(false);
@@ -391,6 +394,13 @@ export default function App() {
   useEffect(() => {
     void loadDocuments();
   }, [loadDocuments]);
+
+  useEffect(() => {
+    message.info(
+      "Be patient, this app runs on free services and may feel slow",
+      8,
+    );
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -498,12 +508,19 @@ export default function App() {
   useEffect(() => {
     setDocTitleEditing(false);
     setSavingDocTitle(false);
+    setSlideSearch("");
   }, [selectedId]);
 
-  const visible = useMemo(
-    () => filterSlides(slides, hideNoHl, starredOnly),
-    [slides, hideNoHl, starredOnly],
-  );
+  const visible = useMemo(() => {
+    let list = filterSlides(slides, hideNoHl, starredOnly);
+    const q = slideSearch.trim().toLowerCase();
+    if (q) {
+      list = list.filter((s) =>
+        (s.full_text ?? "").toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [slides, hideNoHl, starredOnly, slideSearch]);
 
   /** Oldest job at top of footer, newest at bottom (job_id order). */
   const importJobEntriesSorted = useMemo(
@@ -911,7 +928,7 @@ export default function App() {
                   className="app-sider-brand"
                   style={{ margin: "0 0 12px" }}
                 >
-                  <GlobalOutlined /> Bella Note
+                  Bella Note
                 </Title>
                 <Flex gap={8} className="app-sider-toolbar" align="center">
                   <Tooltip title="Import new PDFs">
@@ -1146,44 +1163,55 @@ export default function App() {
                     </div>
                   : null}
                   <div className="main-filters">
-                    <Flex
-                      align="center"
-                      justify="space-between"
-                      wrap="wrap"
-                      gap="middle"
-                    >
-                      <Space wrap size="large">
-                        <Space>
-                          <Text>Hide slides with no highlights</Text>
-                          <Switch checked={hideNoHl} onChange={setHideNoHl} />
+                    <Flex vertical gap="middle" className="main-filters-inner">
+                      <Flex
+                        align="center"
+                        justify="space-between"
+                        wrap="wrap"
+                        gap="middle"
+                      >
+                        <Space wrap size="large">
+                          <Space>
+                            <Text>Hide slides with no highlights</Text>
+                            <Switch checked={hideNoHl} onChange={setHideNoHl} />
+                          </Space>
+                          <Space>
+                            <Text>Show starred only</Text>
+                            <Switch
+                              checked={starredOnly}
+                              onChange={setStarredOnly}
+                            />
+                          </Space>
+                          <Button
+                            icon={<SyncOutlined />}
+                            loading={rescanning}
+                            disabled={
+                              processingBusy ||
+                              !(selectedDoc?.original_stored ?? false)
+                            }
+                            title={
+                              (selectedDoc?.original_stored ?? false) ?
+                                "Re-extract highlights from the stored PDF"
+                              : "No stored PDF (re-upload this file to enable rescan)"
+                            }
+                            onClick={() => void rescanDocument()}
+                          >
+                            Rescan document
+                          </Button>
                         </Space>
-                        <Space>
-                          <Text>Show starred only</Text>
-                          <Switch
-                            checked={starredOnly}
-                            onChange={setStarredOnly}
-                          />
-                        </Space>
-                        <Button
-                          icon={<SyncOutlined />}
-                          loading={rescanning}
-                          disabled={
-                            processingBusy ||
-                            !(selectedDoc?.original_stored ?? false)
-                          }
-                          title={
-                            (selectedDoc?.original_stored ?? false) ?
-                              "Re-extract highlights from the stored PDF"
-                            : "No stored PDF (re-upload this file to enable rescan)"
-                          }
-                          onClick={() => void rescanDocument()}
-                        >
-                          Rescan highlights
-                        </Button>
-                      </Space>
-                      <Text type="secondary">
-                        {visible.length} of {slides.length} slides shown
-                      </Text>
+                        <Text type="secondary">
+                          {visible.length} of {slides.length} slides shown
+                        </Text>
+                      </Flex>
+                      <Input
+                        allowClear
+                        className="main-slide-search"
+                        placeholder="Search text on slides…"
+                        prefix={<SearchOutlined />}
+                        value={slideSearch}
+                        onChange={(e) => setSlideSearch(e.target.value)}
+                        aria-label="Filter slides by text on the page"
+                      />
                     </Flex>
                   </div>
                   <div ref={mainSlidesRef} className="main-slides">

@@ -55,16 +55,14 @@
 }
 
 .app-sider-brand {
-  font-size: 15px !important;
-  font-weight: 600 !important;
+  font-family: "Bricolage Grotesque", system-ui, sans-serif !important;
+  font-size: 1.125rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.03em;
+  line-height: 1.2 !important;
   color: var(--reme-text) !important;
-}
-
-.app-sider-brand .anticon {
-  margin-right: 8px;
-  color: var(--reme-text-secondary);
-  font-size: 1.15em;
-  vertical-align: -0.1em;
+  text-align: center;
+  width: 100%;
 }
 
 .app-sider-toolbar {
@@ -429,6 +427,14 @@
   padding: 16px 24px 12px;
   border-bottom: 1px solid var(--reme-border);
   background: var(--reme-bg-subtle);
+}
+
+.main-filters-inner {
+  width: 100%;
+}
+
+.main-slide-search {
+  width: 100%;
 }
 
 .main-slides {

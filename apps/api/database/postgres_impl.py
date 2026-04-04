@@ -191,11 +191,32 @@ def insert_highlights_for_document(doc_id: int, highlights_by_page: dict[int, li
             )
 
 
+def update_slides_full_text(doc_id: int, full_text_by_page: dict[int, str]) -> None:
+    """Store per-page full text for search (e.g. after rescan)."""
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+                SELECT id, page_number FROM slides
+                WHERE document_id = %s
+                ORDER BY page_number
+                """,
+            (doc_id,),
+        )
+        for row in cur.fetchall():
+            page_num = int(row["page_number"])
+            text = full_text_by_page.get(page_num, "")
+            cur.execute(
+                "UPDATE slides SET full_text = %s WHERE id = %s",
+                (text, int(row["id"])),
+            )
+
+
 def insert_slides_and_highlights(
     doc_id: int,
     total_pages: int,
     slide_paths: list[str],
     highlights_by_page: dict[int, list[str]],
+    full_text_by_page: dict[int, str],
 ) -> None:
     if len(slide_paths) != total_pages:
         raise ValueError("slide_paths length must match total_pages")
@@ -204,13 +225,16 @@ def insert_slides_and_highlights(
             texts = highlights_by_page.get(page_num, [])
             has_h = bool(texts)
             image_path = slide_paths[page_num - 1]
+            page_full = full_text_by_page.get(page_num, "")
             cur.execute(
                 """
-                    INSERT INTO slides (document_id, page_number, image_path, has_highlights)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO slides (
+                        document_id, page_number, image_path, has_highlights, full_text
+                    )
+                    VALUES (%s, %s, %s, %s, %s)
                     RETURNING id
                     """,
-                (doc_id, page_num, image_path, has_h),
+                (doc_id, page_num, image_path, has_h, page_full),
             )
             row = cur.fetchone()
             assert row is not None
@@ -301,7 +325,7 @@ def get_slides_with_highlights(doc_id: int) -> list[dict[str, Any]]:
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-                SELECT id, page_number, image_path, has_highlights, is_hidden
+                SELECT id, page_number, image_path, has_highlights, is_hidden, full_text
                 FROM slides
                 WHERE document_id = %s
                 ORDER BY page_number
@@ -336,6 +360,7 @@ def get_slides_with_highlights(doc_id: int) -> list[dict[str, Any]]:
                     "image_url": f"/slides/{doc_id}/{s['page_number']}",
                     "has_highlights": bool(s["has_highlights"]),
                     "is_hidden": bool(s["is_hidden"]),
+                    "full_text": str(s.get("full_text") or ""),
                     "highlights": highlights,
                 }
             )
