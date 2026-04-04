@@ -23,6 +23,54 @@
   /* Sidebar row: visibly distinct from sider (#e4e7ef) */
   --reme-selected: #cfd6e3;
   --reme-row-line: #e0e4ed;
+  --reme-sider-bg: #e4e7ef;
+  --reme-import-footer-bg: rgba(255, 255, 255, 0.45);
+  --reme-import-row-bg: rgba(255, 255, 255, 0.35);
+  --reme-drag-hover-bg: rgba(30, 41, 59, 0.06);
+  --reme-overlay-bg: rgba(242, 245, 250, 0.9);
+  --reme-fab-shadow: rgba(30, 41, 59, 0.2);
+  /* TipTap / editor surface */
+  --reme-editor-bg: #fafbfc;
+  --reme-editor-border: #d1d7e0;
+  --reme-editor-focus-ring: rgba(95, 107, 122, 0.22);
+  --reme-placeholder: #94a3b8;
+  --reme-star-border: #71717a;
+  /* Solid primary actions (sidebar Import, etc.) */
+  --reme-primary-solid: #5f6b7a;
+  --reme-primary-solid-hover: #4d5765;
+  --reme-on-primary: #f8fafc;
+}
+
+[data-theme="dark"] {
+  --reme-bg: #0f1419;
+  --reme-bg-main: #141a21;
+  --reme-bg-subtle: #1a222d;
+  --reme-surface: #1e2733;
+  --reme-surface-hover: #252f3d;
+  --reme-elevated: #242f3d;
+  --reme-border: #2d3a4a;
+  --reme-border-strong: #3d4d62;
+  --reme-text: #e8ecf1;
+  --reme-text-secondary: #94a3b8;
+  --reme-text-muted: #64748b;
+  --reme-accent: #94a3b8;
+  --reme-accent-soft: rgba(148, 163, 184, 0.18);
+  --reme-selected: #2d3748;
+  --reme-row-line: #2d3a4a;
+  --reme-sider-bg: #1a222d;
+  --reme-import-footer-bg: rgba(255, 255, 255, 0.06);
+  --reme-import-row-bg: rgba(255, 255, 255, 0.04);
+  --reme-drag-hover-bg: rgba(255, 255, 255, 0.08);
+  --reme-overlay-bg: rgba(20, 26, 33, 0.92);
+  --reme-fab-shadow: rgba(0, 0, 0, 0.35);
+  --reme-editor-bg: #1e2733;
+  --reme-editor-border: #3d4d62;
+  --reme-editor-focus-ring: rgba(148, 163, 184, 0.28);
+  --reme-placeholder: #64748b;
+  --reme-star-border: #94a3b8;
+  --reme-primary-solid: #8b9aad;
+  --reme-primary-solid-hover: #9cabc0;
+  --reme-on-primary: #0f1419;
 }
 
 html,

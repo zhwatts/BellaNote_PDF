@@ -57,11 +57,14 @@ import {
   HolderOutlined,
   LoadingOutlined,
   MenuOutlined,
+  MoonOutlined,
   SearchOutlined,
+  SunOutlined,
   SyncOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import { HighlightTextarea } from "./components/HighlightTextarea";
+import { useThemeMode } from "./theme/ThemeProvider";
 import "./App.css";
 
 const { Sider, Content } = Layout;
@@ -434,6 +437,9 @@ export default function App() {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const mainSlidesRef = useRef<HTMLDivElement>(null);
+  const bindMainScrollRef = useCallback((el: HTMLDivElement | null) => {
+    mainSlidesRef.current = el;
+  }, []);
   const firstSlideRef = useRef<HTMLDivElement | null>(null);
   const [showScrollTopFab, setShowScrollTopFab] = useState(false);
   /** Prevents duplicate poll loops (e.g. React Strict Mode or recover + upload). */
@@ -1037,6 +1043,8 @@ export default function App() {
   };
 
   function SidebarPanel() {
+    const { isDark, toggleTheme } = useThemeMode();
+
     return (
       <div className="app-sidebar-panel">
         <div className="app-sider-header">
@@ -1229,6 +1237,23 @@ export default function App() {
                 })}
               </div>
             : null}
+            <div className="app-sider-theme-footer">
+              <Tooltip
+                title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+              >
+                <Button
+                  type="text"
+                  size="small"
+                  block
+                  className="app-sider-theme-toggle"
+                  icon={isDark ? <SunOutlined /> : <MoonOutlined />}
+                  onClick={toggleTheme}
+                  aria-label={
+                    isDark ? "Switch to light theme" : "Switch to dark theme"
+                  }
+                />
+              </Tooltip>
+            </div>
       </div>
     );
   }
@@ -1241,10 +1266,9 @@ export default function App() {
             <Sider
               className="app-sider app-sider--desktop"
               width={280}
-              theme="light"
               style={{
-                borderRight: "1px solid #d1d7e0",
-                background: "#e4e7ef",
+                borderRight: "1px solid var(--reme-border)",
+                background: "var(--reme-sider-bg)",
               }}
             >
               <SidebarPanel />
@@ -1297,7 +1321,12 @@ export default function App() {
                     }
                   />
                 </div>
-              : <>
+              : <div
+                  className={`main-scroll-stack${
+                    narrowLayout ? " main-scroll-stack--unified" : ""
+                  }`}
+                  ref={narrowLayout ? bindMainScrollRef : undefined}
+                >
                   {selectedDoc ?
                     <div className="main-doc-header">
                       <div
@@ -1394,7 +1423,10 @@ export default function App() {
                     </Flex>
                   </div>
                   <div className="main-slides-wrap">
-                    <div ref={mainSlidesRef} className="main-slides">
+                    <div
+                      ref={narrowLayout ? undefined : bindMainScrollRef}
+                      className="main-slides"
+                    >
                       <Spin spinning={loadingSlides}>
                         {visible.length === 0 ?
                           <Empty description="No slides match filters" />
@@ -1448,7 +1480,7 @@ export default function App() {
                       </Tooltip>
                     : null}
                   </div>
-                </>
+                </div>
               }
             </div>
           </Content>
