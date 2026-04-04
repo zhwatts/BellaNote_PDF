@@ -191,14 +191,10 @@ def _ingest_single_pdf(
             )
             shutil.rmtree(slide_dir, ignore_errors=True)
             slide_paths = [
-                slide_storage.db_path_for_page(doc_id, p)
-                for p in range(1, total_pages + 1)
+                slide_storage.db_path_for_page(doc_id, p) for p in range(1, total_pages + 1)
             ]
         else:
-            slide_paths = [
-                str(slide_dir / f"page_{p}.png")
-                for p in range(1, total_pages + 1)
-            ]
+            slide_paths = [str(slide_dir / f"page_{p}.png") for p in range(1, total_pages + 1)]
         if total_pages > 0:
             _progress(
                 total_pages,
@@ -289,7 +285,25 @@ async def _startup() -> None:
     db.init_db()
     asyncio.create_task(_import_worker())
     for row in db.list_active_import_jobs():
-        await import_job_queue.put(int(row["job_id"]))
+        job_id = int(row["job_id"])
+        pair = db.get_import_job_temp_path(job_id)
+        if not pair:
+            log.error("active import job has no row job_id=%s", job_id)
+            continue
+        tmp_path, _fn = pair
+        if not Path(tmp_path).is_file():
+            log.warning(
+                "skipping stale import job job_id=%s (temp file missing: %s)",
+                job_id,
+                tmp_path,
+            )
+            db.fail_import_job(
+                job_id,
+                "Upload file is not available on this server. "
+                "If the database was shared across environments, re-upload the PDF.",
+            )
+            continue
+        await import_job_queue.put(job_id)
 
 
 def _group_highlights_by_page(items: list[dict]) -> dict[int, list[str]]:
@@ -306,6 +320,18 @@ async def _run_import_job(job_id: int) -> None:
         log.error("import job missing row job_id=%s", job_id)
         return
     tmp_path, filename = pair
+    if not Path(tmp_path).is_file():
+        log.warning(
+            "import job temp file missing job_id=%s path=%s",
+            job_id,
+            tmp_path,
+        )
+        db.fail_import_job(
+            job_id,
+            "Upload file is not available on this server. "
+            "If the database was shared across environments, re-upload the PDF.",
+        )
+        return
     db.update_import_job_status(job_id, "processing")
     try:
         result, warns = await asyncio.to_thread(
@@ -331,7 +357,7 @@ async def _run_import_job(job_id: int) -> None:
         db.fail_import_job(job_id, str(e))
     finally:
         with suppress(OSError):
-            os.unlink(tmp_path)
+            Path(tmp_path).unlink(missing_ok=True)
 
 
 def _purge_document_files(doc_id: int) -> None:
@@ -441,9 +467,7 @@ def post_documents_reorder(body: DocumentsReorderBody) -> dict:
     proxy or client uses a trailing slash.
     """
     if len(body.document_ids) != len(set(body.document_ids)):
-        raise HTTPException(
-            status_code=400, detail="document_ids must not contain duplicates"
-        )
+        raise HTTPException(status_code=400, detail="document_ids must not contain duplicates")
     ok = db.reorder_documents(body.document_ids)
     if not ok:
         raise HTTPException(

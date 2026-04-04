@@ -29,8 +29,10 @@ import {
   Card,
   Checkbox,
   Col,
+  Drawer,
   Empty,
   Flex,
+  Grid,
   Input,
   Layout,
   List,
@@ -54,6 +56,7 @@ import {
   EyeOutlined,
   HolderOutlined,
   LoadingOutlined,
+  MenuOutlined,
   SearchOutlined,
   SyncOutlined,
   UploadOutlined,
@@ -418,6 +421,16 @@ export default function App() {
     () => new Set<number>(),
   );
   const [exporting, setExporting] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
+  const screens = Grid.useBreakpoint();
+  /** Below `md` (768px): sidebar is a drawer over the workspace. */
+  const narrowLayout = screens.md !== true;
+
+  const selectDocument = useCallback((id: number) => {
+    setSelectedId(id);
+    setMobileDrawerOpen(false);
+  }, []);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const mainSlidesRef = useRef<HTMLDivElement>(null);
@@ -1023,21 +1036,11 @@ export default function App() {
     }
   };
 
-  return (
-    <>
-      <Layout className="app-shell">
-        <Layout className="app-body">
-          <Sider
-            className="app-sider"
-            width={280}
-            theme="light"
-            style={{
-              borderRight: "1px solid #d1d7e0",
-              background: "#e4e7ef",
-            }}
-          >
-            <div className="app-sider-header">
-              <div className="app-sider-header-inner">
+  function SidebarPanel() {
+    return (
+      <div className="app-sidebar-panel">
+        <div className="app-sider-header">
+          <div className="app-sider-header-inner">
                 <Title
                   level={5}
                   className="app-sider-brand"
@@ -1137,7 +1140,7 @@ export default function App() {
                             doc={d}
                             selected={selectedId === d.id}
                             exportChecked={exportCheckedIds.has(d.id)}
-                            onSelect={() => setSelectedId(d.id)}
+                            onSelect={() => selectDocument(d.id)}
                             onDelete={() => deleteDocument(d.id)}
                             onExportCheckChange={(checked) =>
                               setExportChecked(d.id, checked)
@@ -1226,12 +1229,73 @@ export default function App() {
                 })}
               </div>
             : null}
-          </Sider>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <Layout className="app-shell">
+        <Layout className="app-body">
+          {!narrowLayout ?
+            <Sider
+              className="app-sider app-sider--desktop"
+              width={280}
+              theme="light"
+              style={{
+                borderRight: "1px solid #d1d7e0",
+                background: "#e4e7ef",
+              }}
+            >
+              <SidebarPanel />
+            </Sider>
+          : null}
+          {narrowLayout ?
+            <Drawer
+              placement="left"
+              width={280}
+              open={mobileDrawerOpen}
+              onClose={() => setMobileDrawerOpen(false)}
+              className="app-sider-drawer"
+              closable={false}
+              maskClosable
+              styles={{
+                body: {
+                  padding: 0,
+                  height: "100%",
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                },
+              }}
+              zIndex={1050}
+            >
+              <SidebarPanel />
+            </Drawer>
+          : null}
           <Content className="app-main">
             <div className="main-column">
+              {narrowLayout ?
+                <div className="main-mobile-toolbar">
+                  <Button
+                    type="text"
+                    className="main-mobile-menu-btn"
+                    icon={<MenuOutlined />}
+                    aria-label="Open document list"
+                    aria-expanded={mobileDrawerOpen}
+                    onClick={() => setMobileDrawerOpen(true)}
+                  />
+                </div>
+              : null}
               {!selectedId ?
                 <div className="main-empty">
-                  <Empty description="Select a document from the sidebar" />
+                  <Empty
+                    description={
+                      narrowLayout ?
+                        "Open the menu to choose a document"
+                      : "Select a document from the sidebar"
+                    }
+                  />
                 </div>
               : <>
                   {selectedDoc ?
@@ -1439,6 +1503,10 @@ function SlideCard({
   onNewNoteFocusHandled: () => void;
   onImageClick: () => void;
 }) {
+  const screens = Grid.useBreakpoint();
+  /** At `md+`, notes column matches image height and scrolls inside; below `md`, notes flow fully. */
+  const matchNotesHeightToImage = screens.md === true;
+
   const imageColRef = useRef<HTMLDivElement>(null);
   const [notesMaxHeight, setNotesMaxHeight] = useState<number | undefined>(
     undefined,
@@ -1454,7 +1522,7 @@ function SlideCard({
   }, []);
 
   useLayoutEffect(() => {
-    if (slide.is_hidden) return;
+    if (slide.is_hidden || !matchNotesHeightToImage) return;
     const el = imageColRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
@@ -1465,7 +1533,13 @@ function SlideCard({
     return () => {
       ro.disconnect();
     };
-  }, [slide.is_hidden, slide.slide_id, slide.image_url, updateNotesMaxHeight]);
+  }, [
+    matchNotesHeightToImage,
+    slide.is_hidden,
+    slide.slide_id,
+    slide.image_url,
+    updateNotesMaxHeight,
+  ]);
 
   if (slide.is_hidden) {
     return (
@@ -1517,15 +1591,25 @@ function SlideCard({
         </Col>
         <Col xs={24} md={10} lg={9}>
           <div
-            className="slide-notes-col"
+            className={
+              matchNotesHeightToImage ?
+                "slide-notes-col"
+              : "slide-notes-col slide-notes-col--stacked"
+            }
             style={
-              notesMaxHeight != null ?
+              matchNotesHeightToImage && notesMaxHeight != null ?
                 { height: notesMaxHeight, maxHeight: notesMaxHeight }
               : undefined
             }
           >
             <div className="slide-notes-panel">
-              <div className="slide-notes-scroll">
+              <div
+                className={
+                  matchNotesHeightToImage ?
+                    "slide-notes-scroll"
+                  : "slide-notes-scroll slide-notes-scroll--stacked"
+                }
+              >
                 {slide.highlights.length === 0 ?
                   <Text type="secondary">No highlights from PDF</Text>
                 : <List

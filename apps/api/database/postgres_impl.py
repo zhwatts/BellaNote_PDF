@@ -609,9 +609,7 @@ def _import_job_row_to_public(row: Any) -> dict[str, Any]:
         "job_id": int(row["id"]),
         "filename": row["filename"],
         "status": row["status"],
-        "document_id": int(row["document_id"])
-        if row["document_id"] is not None
-        else None,
+        "document_id": int(row["document_id"]) if row["document_id"] is not None else None,
         "error_message": row["error_message"],
         "progress_current": int(pc) if pc is not None else None,
         "progress_total": int(pt) if pt is not None else None,

@@ -43,6 +43,25 @@
   overflow: hidden;
 }
 
+/* Shared by desktop Sider + mobile Drawer: same flex shell as former sider-children */
+.app-sidebar-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #e4e7ef;
+}
+
+.app-sider-drawer .ant-drawer-body {
+  max-height: 100dvh;
+}
+
+.app-sider-drawer .ant-drawer-content-wrapper {
+  max-width: min(280px, 92vw);
+}
+
 .app-sider-header {
   flex-shrink: 0;
   display: flex;
@@ -340,9 +359,28 @@
 .main-column {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.main-mobile-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  padding-left: max(12px, env(safe-area-inset-left));
+  padding-top: max(8px, env(safe-area-inset-top));
+  border-bottom: 1px solid var(--reme-border);
+  background: var(--reme-bg-subtle);
+}
+
+.main-mobile-menu-btn.ant-btn {
+  font-size: 18px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
 }
 
 .main-empty {
@@ -455,9 +493,32 @@
 .main-slides-scroll-top-fab {
   position: absolute;
   right: 28px;
-  bottom: 24px;
+  bottom: max(24px, env(safe-area-inset-bottom));
   z-index: 5;
   box-shadow: 0 4px 14px rgba(30, 41, 59, 0.2);
+}
+
+@media (max-width: 767px) {
+  .main-doc-header {
+    padding: 12px 16px 8px;
+  }
+
+  .main-filters {
+    padding: 12px 16px 10px;
+  }
+
+  .main-slides {
+    padding: 12px 16px 28px;
+  }
+
+  .main-slides-scroll-top-fab {
+    right: 16px;
+    bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .main-empty {
+    padding: 16px;
+  }
 }
 
 .slide-card-outer {
@@ -528,6 +589,25 @@
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+/* Below `md`: notes follow the image; no inner scroll / clipped column */
+.slide-notes-col--stacked {
+  margin-top: 4px;
+  overflow: visible;
+  min-height: auto;
+}
+
+.slide-notes-col--stacked .slide-notes-panel {
+  overflow: visible;
+  max-height: none;
+  min-height: auto;
+}
+
+.slide-notes-scroll--stacked {
+  flex: none;
+  min-height: auto;
+  overflow: visible;
 }
 
 .slide-notes-add-wrap {
