@@ -75,6 +75,15 @@ async def _import_worker() -> None:
 
 
 @app.middleware("http")
+async def _normalize_trailing_slash(request: Request, call_next):
+    """One OpenAPI path per route; accept /path and /path/ by normalizing before routing."""
+    path = request.scope.get("path") or ""
+    if path != "/" and path.endswith("/"):
+        request.scope["path"] = path.rstrip("/") or "/"
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def _log_upload_request_start(request: Request, call_next):
     """Log as soon as the request hits the app (before multipart body is fully read)."""
     path = request.url.path.rstrip("/") or "/"
@@ -378,7 +387,6 @@ def _purge_document_files(doc_id: int) -> None:
 
 
 @app.post("/upload", response_model=None)
-@app.post("/upload/", response_model=None)
 async def upload(
     files: list[UploadFile] = File(...),
 ) -> JSONResponse | dict:
@@ -438,14 +446,12 @@ async def upload(
 
 
 @app.get("/import/jobs/active")
-@app.get("/import/jobs/active/")
 def list_active_import_jobs() -> dict:
     """Return pending/processing jobs so the SPA can resume progress UI after refresh."""
     return {"jobs": db.list_active_import_jobs()}
 
 
 @app.get("/import/jobs/{job_id}")
-@app.get("/import/jobs/{job_id}/")
 def get_import_job_status(job_id: int) -> dict:
     row = db.get_import_job_public(job_id)
     if not row:
@@ -459,13 +465,8 @@ def list_documents() -> list[dict]:
 
 
 @app.post("/documents/reorder")
-@app.post("/documents/reorder/")
 def post_documents_reorder(body: DocumentsReorderBody) -> dict:
-    """Persist sidebar order (0 = top). Body must list every document id exactly once.
-
-    Both paths are registered so POST is not misrouted to StaticFiles (405) when a
-    proxy or client uses a trailing slash.
-    """
+    """Persist sidebar order (0 = top). Body must list every document id exactly once."""
     if len(body.document_ids) != len(set(body.document_ids)):
         raise HTTPException(status_code=400, detail="document_ids must not contain duplicates")
     ok = db.reorder_documents(body.document_ids)
@@ -478,7 +479,6 @@ def post_documents_reorder(body: DocumentsReorderBody) -> dict:
 
 
 @app.patch("/documents/{doc_id}")
-@app.patch("/documents/{doc_id}/")
 def patch_document(doc_id: int, body: DocumentFilenameBody) -> dict:
     """Rename the document (display name)."""
     if not db.document_exists(doc_id):
@@ -516,7 +516,6 @@ def get_slide_image(doc_id: int, page_number: int) -> FileResponse | RedirectRes
 
 
 @app.post("/slides/{slide_id}/highlights")
-@app.post("/slides/{slide_id}/highlights/")
 def create_highlight(slide_id: int, body: HighlightCreateBody) -> dict:
     """Add a manual note / highlight on a slide (same storage as extracted highlights)."""
     hid = db.insert_highlight(slide_id, body.text)
@@ -526,7 +525,6 @@ def create_highlight(slide_id: int, body: HighlightCreateBody) -> dict:
 
 
 @app.patch("/slides/{slide_id}/hide")
-@app.patch("/slides/{slide_id}/hide/")
 def patch_slide_hide(slide_id: int, body: SlideHideBody) -> dict:
     hidden = body.hidden
     ok = db.set_slide_hidden(slide_id, hidden)
@@ -536,7 +534,6 @@ def patch_slide_hide(slide_id: int, body: SlideHideBody) -> dict:
 
 
 @app.patch("/highlights/{highlight_id}/very-important")
-@app.patch("/highlights/{highlight_id}/very-important/")
 def patch_highlight_important(highlight_id: int, body: HighlightImportantBody) -> dict:
     vi = body.very_important
     ok = db.set_highlight_very_important(highlight_id, vi)
@@ -546,7 +543,6 @@ def patch_highlight_important(highlight_id: int, body: HighlightImportantBody) -
 
 
 @app.patch("/highlights/{highlight_id}/text")
-@app.patch("/highlights/{highlight_id}/text/")
 def patch_highlight_text(highlight_id: int, body: HighlightTextBody) -> dict:
     ok = db.set_highlight_text(highlight_id, body.text)
     if not ok:
@@ -555,7 +551,6 @@ def patch_highlight_text(highlight_id: int, body: HighlightTextBody) -> dict:
 
 
 @app.delete("/highlights/{highlight_id}")
-@app.delete("/highlights/{highlight_id}/")
 def delete_highlight(highlight_id: int) -> dict:
     ok = db.delete_highlight(highlight_id)
     if not ok:
@@ -609,7 +604,6 @@ def export_all(
 
 
 @app.post("/documents/{doc_id}/rescan")
-@app.post("/documents/{doc_id}/rescan/")
 def rescan_document(doc_id: int) -> dict:
     """Re-extract highlights from the stored PDF (e.g. after deleting false positives)."""
     if not db.document_exists(doc_id):
@@ -652,7 +646,6 @@ def rescan_document(doc_id: int) -> dict:
 
 
 @app.delete("/documents/{doc_id}")
-@app.delete("/documents/{doc_id}/")
 def delete_document(doc_id: int) -> dict:
     if not db.document_exists(doc_id):
         raise HTTPException(status_code=404, detail="Document not found")
